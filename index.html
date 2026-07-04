@@ -13,31 +13,30 @@
       theme: {
         extend: {
           colors: {
-            bosque: '#0A4A3F',
-            selva: '#0E5F4E',
-            menta: '#16A97A',
-            brote: '#E8F4EE',
-            tinta: '#152420',
-            humo: '#5F6E68',
-            marfil: '#F4F7F5',
+            primario: '#EA0000',
+            oscuro: '#B80000',
+            tinte: '#FDECEC',
+            tinta: '#1E1A1A',
+            humo: '#6E6767',
+            marfil: '#F6F4F4',
           },
           boxShadow: {
-            tarjeta: '0 1px 2px rgba(21,36,32,.06), 0 4px 14px rgba(21,36,32,.05)',
+            tarjeta: '0 1px 2px rgba(30,26,26,.06), 0 4px 14px rgba(30,26,26,.05)',
           },
         },
       },
     };
   </script>
   <style>
-    html { background: #E5EBE8; }
+    html { background: #EBE7E7; }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
     .num { font-variant-numeric: tabular-nums; }
     .codigo-barras {
       height: 44px;
       background: repeating-linear-gradient(90deg,
-        #152420 0px, #152420 2px, transparent 2px, transparent 5px,
-        #152420 5px, #152420 6px, transparent 6px, transparent 11px,
-        #152420 11px, #152420 14px, transparent 14px, transparent 17px);
+        #1E1A1A 0px, #1E1A1A 2px, transparent 2px, transparent 5px,
+        #1E1A1A 5px, #1E1A1A 6px, transparent 6px, transparent 11px,
+        #1E1A1A 11px, #1E1A1A 14px, transparent 14px, transparent 17px);
     }
   </style>
 </head>
@@ -48,14 +47,48 @@
 const { useState, useReducer, useEffect, useRef } = React;
 
 /* ============================================================
-   Utilidades
+   Utilidades y modelo de negocio
    ============================================================ */
 const fmt = (n) => "$ " + Math.round(n).toLocaleString("es-CO");
 const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-const TARIFA_PCT = { garantizado: 0.08, gestion: 0.04 };
+
+// Así gana Rentia: garantía mensual + spread del adelanto + estudio del inquilino
+const GARANTIA_PCT = 0.05;   // tarifa de garantía mensual (% del canon)
+const SPREAD_PCT = 0.02;     // spread por adelantar la plata el día 1
+const GESTION_PCT = 0.04;    // plan sin garantía: solo gestión de cobro
+const ESTUDIO = 60000;       // cuota única de estudio del inquilino
+const TARIFA_PCT = { garantizado: GARANTIA_PCT + SPREAD_PCT, gestion: GESTION_PCT };
 const tarifaDe = (canon, plan) => Math.round((canon * TARIFA_PCT[plan]) / 1000) * 1000;
 const netoDe = (inm) => inm.canon - tarifaDe(inm.canon, inm.plan);
+
+const TIPOS = {
+  apartamento: { label: "Apartamento", emoji: "🏢" },
+  casa: { label: "Casa", emoji: "🏡" },
+  oficina: { label: "Oficina", emoji: "💼" },
+  local: { label: "Local", emoji: "🏬" },
+  cuarto: { label: "Cuarto", emoji: "🚪" },
+};
+
+const fotoDe = (seed) => "https://picsum.photos/seed/" + seed + "/640/360";
+const fotoRespaldo = (tipo) => {
+  const t = TIPOS[tipo] || TIPOS.apartamento;
+  const svg = "<svg xmlns='http://www.w3.org/2000/svg' width='640' height='360'>" +
+    "<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>" +
+    "<stop offset='0' stop-color='#EFEBEB'/><stop offset='1' stop-color='#D9D2D2'/>" +
+    "</linearGradient></defs><rect width='640' height='360' fill='url(#g)'/>" +
+    "<text x='50%' y='46%' font-size='104' text-anchor='middle' dominant-baseline='middle'>" + t.emoji + "</text>" +
+    "<text x='50%' y='74%' font-size='30' text-anchor='middle' fill='#6E6767' font-family='sans-serif' font-weight='600'>" + t.label + "</text></svg>";
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+};
+
+// Ningún inmueble sin foto: si la foto externa no carga, entra el respaldo.
+const Foto = ({ foto, tipo, alt, className }) => (
+  <img
+    src={foto} alt={alt} loading="lazy" className={className}
+    onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = fotoRespaldo(tipo); }}
+  />
+);
 
 /* ============================================================
    Datos de ejemplo precargados (julio 2026, hoy es 4 de julio)
@@ -63,8 +96,10 @@ const netoDe = (inm) => inm.canon - tarifaDe(inm.canon, inm.plan);
 const INMUEBLES_INICIALES = [
   {
     id: 1,
+    tipo: "apartamento",
     nombre: "Apto 302 · Chapinero",
     direccion: "Cra 9 # 60-21, Bogotá",
+    foto: fotoDe("rentia-apartamento-1"),
     canon: 1800000,
     diaPago: 5,
     plan: "garantizado",
@@ -73,7 +108,7 @@ const INMUEBLES_INICIALES = [
     desembolso: { estado: "adelantado", texto: "Adelantado el 1 de julio" },
     cobro: {
       estado: "pagado",
-      texto: "María pagó el 3 de julio con el link de pago",
+      texto: "María pagó el 3 de julio ✓",
       codigo: null,
       gestiones: [
         { fecha: "1 jul", texto: "Recordatorio automático enviado por WhatsApp" },
@@ -81,16 +116,18 @@ const INMUEBLES_INICIALES = [
       ],
     },
     historial: [
-      { fecha: "1 abr", concepto: "Adelanto Rentia", monto: 1656000 },
-      { fecha: "1 may", concepto: "Adelanto Rentia", monto: 1656000 },
-      { fecha: "1 jun", concepto: "Adelanto Rentia", monto: 1656000 },
-      { fecha: "1 jul", concepto: "Adelanto Rentia", monto: 1656000 },
+      { fecha: "1 abr", concepto: "Adelanto Rentia", monto: 1674000 },
+      { fecha: "1 may", concepto: "Adelanto Rentia", monto: 1674000 },
+      { fecha: "1 jun", concepto: "Adelanto Rentia", monto: 1674000 },
+      { fecha: "1 jul", concepto: "Adelanto Rentia", monto: 1674000 },
     ],
   },
   {
     id: 2,
-    nombre: "Casa 2 pisos · Suba",
+    tipo: "casa",
+    nombre: "Casa · Suba",
     direccion: "Cl 139 # 91-40, Bogotá",
+    foto: fotoDe("rentia-casa-2"),
     canon: 1200000,
     diaPago: 10,
     plan: "garantizado",
@@ -107,15 +144,43 @@ const INMUEBLES_INICIALES = [
       ],
     },
     historial: [
-      { fecha: "1 may", concepto: "Adelanto Rentia", monto: 1104000 },
-      { fecha: "1 jun", concepto: "Adelanto Rentia", monto: 1104000 },
-      { fecha: "1 jul", concepto: "Adelanto Rentia", monto: 1104000 },
+      { fecha: "1 may", concepto: "Adelanto Rentia", monto: 1116000 },
+      { fecha: "1 jun", concepto: "Adelanto Rentia", monto: 1116000 },
+      { fecha: "1 jul", concepto: "Adelanto Rentia", monto: 1116000 },
     ],
   },
   {
     id: 3,
-    nombre: "Local comercial · Kennedy",
+    tipo: "cuarto",
+    nombre: "Cuarto · Teusaquillo",
+    direccion: "Cra 17 # 39-55, Bogotá",
+    foto: fotoDe("rentia-cuarto-3"),
+    canon: 650000,
+    diaPago: 3,
+    plan: "garantizado",
+    perfil: "nuevo",
+    inquilino: { nombre: "Julián Ortiz", telefono: "315 640 2291", metodo: "transferencia" },
+    desembolso: { estado: "adelantado", texto: "Adelantado el 1 de julio" },
+    cobro: {
+      estado: "pagado",
+      texto: "Julián pagó el 2 de julio ✓",
+      codigo: null,
+      gestiones: [
+        { fecha: "1 jul", texto: "Recordatorio automático enviado por WhatsApp" },
+        { fecha: "2 jul", texto: "Pago recibido por link de pago · " + fmt(650000) },
+      ],
+    },
+    historial: [
+      { fecha: "1 jun", concepto: "Adelanto Rentia", monto: 604000 },
+      { fecha: "1 jul", concepto: "Adelanto Rentia", monto: 604000 },
+    ],
+  },
+  {
+    id: 4,
+    tipo: "local",
+    nombre: "Local · Kennedy",
     direccion: "Cl 38 sur # 78-15, Bogotá",
+    foto: fotoDe("rentia-local-4"),
     canon: 950000,
     diaPago: 5,
     plan: "gestion",
@@ -376,9 +441,9 @@ const IC = {
    ============================================================ */
 const Insignia = ({ tono, children }) => {
   const tonos = {
-    verde: "bg-brote text-bosque",
-    ambar: "bg-amber-100 text-amber-800",
-    rojo: "bg-rose-100 text-rose-700",
+    positivo: "bg-tinte text-oscuro",
+    proceso: "bg-amber-100 text-amber-800",
+    mora: "bg-tinta text-white",
     gris: "bg-marfil text-humo",
   };
   return (
@@ -407,12 +472,12 @@ const Toast = ({ texto, alCerrar }) => {
    ============================================================ */
 function insigniaPrincipal(inm) {
   if (inm.plan === "garantizado") {
-    if (inm.desembolso.estado === "adelantado") return <Insignia tono="verde">Adelantado ✓</Insignia>;
+    if (inm.desembolso.estado === "adelantado") return <Insignia tono="positivo">Adelantado ✓</Insignia>;
     return <Insignia tono="gris">Programado día 1</Insignia>;
   }
-  if (inm.cobro.estado === "pagado") return <Insignia tono="verde">Pagado ✓</Insignia>;
-  if (inm.cobro.estado === "mora") return <Insignia tono="rojo">En mora</Insignia>;
-  return <Insignia tono="ambar">Cobrando al inquilino</Insignia>;
+  if (inm.cobro.estado === "pagado") return <Insignia tono="positivo">Pagado ✓</Insignia>;
+  if (inm.cobro.estado === "mora") return <Insignia tono="mora">En mora</Insignia>;
+  return <Insignia tono="proceso">Cobrando al inquilino</Insignia>;
 }
 
 function TarjetaInmueble({ inm, mesIdx, dispatch }) {
@@ -420,87 +485,87 @@ function TarjetaInmueble({ inm, mesIdx, dispatch }) {
   const neto = netoDe(inm);
   const proximoMes = MESES[(mesIdx + 1) % 12];
   const enProblemas = inm.cobro.estado !== "pagado";
+  const tipo = TIPOS[inm.tipo];
 
   return (
-    <article className="bg-white rounded-2xl shadow-tarjeta p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="font-bold text-tinta leading-snug">{inm.nombre}</h3>
-          <p className="text-xs text-humo mt-0.5">{inm.direccion}</p>
-        </div>
-        {insigniaPrincipal(inm)}
-      </div>
-
-      <div className="mt-4 flex items-center justify-between text-sm">
-        <span className="text-humo">Canon mensual</span>
-        <span className="font-bold text-tinta num">{fmt(inm.canon)}</span>
-      </div>
-      <div className="mt-1.5 flex items-center justify-between text-sm">
-        <span className="text-humo">Plan</span>
-        <span className={"font-semibold " + (inm.plan === "garantizado" ? "text-bosque" : "text-humo")}>
-          {inm.plan === "garantizado" ? "Arriendo Garantizado" : "Solo Gestión de Cobro"}
+    <article className="bg-white rounded-2xl shadow-tarjeta overflow-hidden">
+      <div className="relative">
+        <Foto foto={inm.foto} tipo={inm.tipo} alt={"Foto de " + inm.nombre} className="w-full h-36 object-cover" />
+        <span className="absolute top-3 left-3 bg-white/95 text-tinta text-xs font-semibold rounded-full px-2.5 py-1 shadow-sm">
+          {tipo.emoji} {tipo.label}
         </span>
+        <span className="absolute top-3 right-3">{insigniaPrincipal(inm)}</span>
       </div>
 
-      {/* Estado del cobro al inquilino */}
-      <div className={"mt-4 rounded-xl px-3.5 py-3 text-sm " + (
-        inm.cobro.estado === "pagado" ? "bg-brote text-bosque" :
-        inm.cobro.estado === "mora" ? "bg-rose-50 text-rose-800" : "bg-amber-50 text-amber-800"
-      )}>
-        <p className="font-medium">{inm.cobro.texto}</p>
-        {inm.plan === "garantizado" && enProblemas && (
-          <p className="mt-1.5 flex items-center gap-1.5 text-xs font-semibold text-bosque">
-            <Icono d={IC.escudo} className="w-4 h-4" /> Esto no afecta tu pago: ya lo tienes.
-          </p>
+      <div className="p-5 pt-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <h3 className="font-bold text-tinta leading-snug">{inm.nombre}</h3>
+          <p className="font-bold text-tinta num shrink-0">{fmt(inm.canon)}</p>
+        </div>
+        <p className="text-xs text-humo mt-0.5">
+          {inm.direccion} · {inm.plan === "garantizado" ? "Arriendo Garantizado" : "Solo Gestión de Cobro"}
+        </p>
+
+        {/* Estado del cobro al inquilino */}
+        <div className={"mt-3 rounded-xl px-3.5 py-3 text-sm " + (
+          inm.cobro.estado === "pagado" ? "bg-tinte text-oscuro" :
+          inm.cobro.estado === "mora" ? "bg-marfil text-tinta" : "bg-amber-50 text-amber-800"
+        )}>
+          <p className="font-medium">{inm.cobro.texto}</p>
+          {inm.plan === "garantizado" && enProblemas && (
+            <p className="mt-1.5 flex items-center gap-1.5 text-xs font-semibold text-oscuro">
+              <Icono d={IC.escudo} className="w-4 h-4" /> Esto no afecta tu pago: ya lo tienes.
+            </p>
+          )}
+        </div>
+
+        {/* Próximo desembolso */}
+        <div className="mt-3 flex items-center justify-between rounded-xl border border-marfil px-3.5 py-3">
+          <div>
+            <p className="text-[11px] uppercase tracking-wide text-humo font-semibold">Próximo desembolso</p>
+            <p className="text-sm text-tinta font-medium mt-0.5">
+              {inm.plan === "garantizado" ? "1 de " + proximoMes : inm.desembolso.estado === "pendiente" ? "Cuando el inquilino pague" : "Con el próximo recaudo"}
+            </p>
+          </div>
+          <p className="font-bold text-primario num">{fmt(neto)}</p>
+        </div>
+
+        {inm.plan === "gestion" && inm.cobro.estado === "mora" && (
+          <div className="mt-3 rounded-xl bg-tinta text-white px-3.5 py-3 text-sm">
+            <p className="font-semibold">Con Arriendo Garantizado, esta plata te habría llegado el día 1.</p>
+            <p className="text-white/70 text-xs mt-1">Nosotros asumimos la mora, no tú.</p>
+          </div>
+        )}
+
+        <div className="mt-4 flex items-center justify-between">
+          <button
+            onClick={() => setVerHistorial(!verHistorial)}
+            className="text-sm font-semibold text-humo hover:text-tinta"
+          >
+            {verHistorial ? "Ocultar pagos" : "Pagos recibidos (" + inm.historial.length + ")"}
+          </button>
+          <button
+            onClick={() => dispatch({ tipo: "IR", pantalla: "cobranza", cobranzaId: inm.id })}
+            className="text-sm font-semibold text-primario hover:text-oscuro"
+          >
+            Ver cobranza →
+          </button>
+        </div>
+
+        {verHistorial && (
+          <ul className="mt-3 border-t border-marfil pt-3 flex flex-col gap-2">
+            {[...inm.historial].reverse().map((h, i) => (
+              <li key={i} className="flex items-center justify-between text-sm">
+                <span className="text-humo">
+                  <span className="num font-medium text-tinta">{h.fecha}</span> · {h.concepto}
+                </span>
+                <span className="font-semibold text-primario num">+ {fmt(h.monto)}</span>
+              </li>
+            ))}
+            {inm.historial.length === 0 && <li className="text-sm text-humo">Aún no hay pagos: tu primer desembolso está programado.</li>}
+          </ul>
         )}
       </div>
-
-      {/* Próximo desembolso */}
-      <div className="mt-3 flex items-center justify-between rounded-xl border border-marfil px-3.5 py-3">
-        <div>
-          <p className="text-[11px] uppercase tracking-wide text-humo font-semibold">Próximo desembolso</p>
-          <p className="text-sm text-tinta font-medium mt-0.5">
-            {inm.plan === "garantizado" ? "1 de " + proximoMes : inm.desembolso.estado === "pendiente" ? "Cuando el inquilino pague" : "Con el próximo recaudo"}
-          </p>
-        </div>
-        <p className="font-bold text-bosque num">{fmt(neto)}</p>
-      </div>
-
-      {inm.plan === "gestion" && inm.cobro.estado === "mora" && (
-        <div className="mt-3 rounded-xl bg-bosque text-white px-3.5 py-3 text-sm">
-          <p className="font-semibold">Con Arriendo Garantizado, esta plata te habría llegado el día 1.</p>
-          <p className="text-white/80 text-xs mt-1">Nosotros asumimos la mora, no tú.</p>
-        </div>
-      )}
-
-      <div className="mt-4 flex items-center justify-between">
-        <button
-          onClick={() => setVerHistorial(!verHistorial)}
-          className="text-sm font-semibold text-humo hover:text-tinta"
-        >
-          {verHistorial ? "Ocultar pagos" : "Pagos recibidos (" + inm.historial.length + ")"}
-        </button>
-        <button
-          onClick={() => dispatch({ tipo: "IR", pantalla: "cobranza", cobranzaId: inm.id })}
-          className="text-sm font-semibold text-bosque hover:text-selva"
-        >
-          Ver cobranza →
-        </button>
-      </div>
-
-      {verHistorial && (
-        <ul className="mt-3 border-t border-marfil pt-3 flex flex-col gap-2">
-          {[...inm.historial].reverse().map((h, i) => (
-            <li key={i} className="flex items-center justify-between text-sm">
-              <span className="text-humo">
-                <span className="num font-medium text-tinta">{h.fecha}</span> · {h.concepto}
-              </span>
-              <span className="font-semibold text-menta num">+ {fmt(h.monto)}</span>
-            </li>
-          ))}
-          {inm.historial.length === 0 && <li className="text-sm text-humo">Aún no hay pagos: tu primer desembolso está programado.</li>}
-        </ul>
-      )}
     </article>
   );
 }
@@ -513,44 +578,49 @@ function Inicio({ state, dispatch }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Hero: la tesis en 10 segundos */}
-      <section className="rounded-2xl bg-bosque text-white p-6 shadow-tarjeta relative overflow-hidden">
-        <div className="absolute -right-10 -top-10 w-40 h-40 rounded-full bg-selva opacity-60" aria-hidden="true"></div>
+      {/* Hero: la promesa completa, en una sola frase */}
+      <section className="rounded-2xl bg-primario text-white p-6 shadow-tarjeta relative overflow-hidden">
+        <div className="absolute -right-10 -top-10 w-40 h-40 rounded-full bg-oscuro opacity-50" aria-hidden="true"></div>
         <div className="relative">
-          <p className="text-sm font-medium text-white/80">Tu arriendo de {MESES[mesIdx]} ya está en tu cuenta</p>
-          <p className="text-4xl font-extrabold num mt-2 tracking-tight">{fmt(totalAdelantado)}</p>
-          <p className="text-sm text-white/80 mt-1">
-            Desembolsado el 1 de {MESES[mesIdx]} · {garantizados.length} {garantizados.length === 1 ? "inmueble garantizado" : "inmuebles garantizados"}
+          <h1 className="text-xl font-extrabold leading-snug tracking-tight">Te garantizamos tu arriendo cada mes.</h1>
+          <p className="text-sm text-white/90 mt-1.5 leading-snug">
+            Si el inquilino no paga, te pagamos nosotros. Tú no persigues a nadie.
           </p>
-          <div className="mt-4 inline-flex items-center gap-2 bg-white/10 rounded-full px-3.5 py-2 text-xs font-semibold">
-            <Icono d={IC.escudo} className="w-4 h-4" />
-            Si el inquilino no paga, el problema es nuestro. No tuyo.
+          <div className="mt-4 pt-4 border-t border-white/20">
+            <p className="text-3xl font-extrabold num tracking-tight">{fmt(totalAdelantado)}</p>
+            <p className="text-sm text-white/85 mt-0.5">
+              ya en tu cuenta este mes · desembolsado el 1 de {MESES[mesIdx]}
+            </p>
           </div>
         </div>
       </section>
 
-      {/* Cómo funciona, en una línea */}
-      <section className="bg-white rounded-2xl shadow-tarjeta px-5 py-4 flex items-center justify-between text-center">
-        {[
-          ["1", "Te pagamos el día 1"],
-          ["2", "Nosotros cobramos"],
-          ["3", "Tú no persigues a nadie"],
-        ].map(([n, t], i) => (
-          <React.Fragment key={n}>
-            {i > 0 && <span className="text-marfil text-2xl font-light" aria-hidden="true">›</span>}
-            <div className="flex-1">
-              <p className="text-lg font-extrabold text-bosque num">{n}</p>
-              <p className="text-[11px] text-humo font-medium leading-tight mt-0.5">{t}</p>
-            </div>
-          </React.Fragment>
-        ))}
+      {/* Cómo gana Rentia: explícito, sin letra menuda */}
+      <section className="bg-white rounded-2xl shadow-tarjeta p-5">
+        <p className="text-sm font-bold text-tinta">
+          Cobramos una tarifa de garantía; a cambio, asumimos el riesgo de que no te paguen.
+        </p>
+        <ul className="mt-3 flex flex-col gap-2 text-sm">
+          <li className="flex items-center justify-between">
+            <span className="text-humo">Tarifa de garantía mensual</span>
+            <span className="font-bold text-tinta num">5% del arriendo</span>
+          </li>
+          <li className="flex items-center justify-between">
+            <span className="text-humo">Adelanto del día 1 (spread)</span>
+            <span className="font-bold text-tinta num">2% del arriendo</span>
+          </li>
+          <li className="flex items-center justify-between">
+            <span className="text-humo">Estudio del inquilino</span>
+            <span className="font-bold text-tinta num">{fmt(ESTUDIO)} · una vez</span>
+          </li>
+        </ul>
       </section>
 
       <div className="flex items-center justify-between mt-1">
         <h2 className="font-bold text-tinta text-lg">Tus inmuebles</h2>
         {conNovedad > 0 && (
           <span className="text-xs font-semibold text-humo">
-            {conNovedad} en gestión de cobro — sin acción tuya
+            {conNovedad} en cobro — sin acción tuya
           </span>
         )}
       </div>
@@ -561,7 +631,7 @@ function Inicio({ state, dispatch }) {
 
       <button
         onClick={() => dispatch({ tipo: "ABRIR_ONBOARDING" })}
-        className="rounded-2xl border-2 border-dashed border-humo/30 text-humo font-semibold py-4 hover:border-bosque hover:text-bosque transition-colors flex items-center justify-center gap-2"
+        className="rounded-2xl border-2 border-dashed border-humo/30 text-humo font-semibold py-4 hover:border-primario hover:text-primario transition-colors flex items-center justify-center gap-2"
       >
         <Icono d={IC.mas} className="w-5 h-5" /> Agregar otro inmueble
       </button>
@@ -574,12 +644,12 @@ function Inicio({ state, dispatch }) {
    ============================================================ */
 function ReciboEfectivo({ codigo, inquilino }) {
   return (
-    <div className="mt-4 rounded-xl border-2 border-dashed border-bosque/30 bg-marfil p-4">
+    <div className="mt-4 rounded-xl border-2 border-dashed border-primario/30 bg-marfil p-4">
       <div className="flex items-center justify-between">
-        <p className="font-extrabold text-bosque tracking-tight">RENTIA · Recibo de pago</p>
+        <p className="font-extrabold text-primario tracking-tight">RENTIA · Recibo de pago</p>
         <div className="flex gap-1.5">
           <span className="text-[10px] font-bold bg-yellow-300 text-yellow-900 rounded px-1.5 py-0.5">EFECTY</span>
-          <span className="text-[10px] font-bold bg-red-500 text-white rounded px-1.5 py-0.5">BALOTO</span>
+          <span className="text-[10px] font-bold bg-tinta text-white rounded px-1.5 py-0.5">BALOTO</span>
         </div>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
@@ -601,7 +671,7 @@ function ReciboEfectivo({ codigo, inquilino }) {
         </div>
       </div>
       <div className="codigo-barras mt-4 rounded" role="img" aria-label="Código de barras del recibo"></div>
-      <p className="mt-3 text-xs text-bosque font-semibold flex items-center gap-1.5">
+      <p className="mt-3 text-xs text-oscuro font-semibold flex items-center gap-1.5">
         <Icono d={IC.escudo} className="w-4 h-4 shrink-0" />
         El efectivo entra directo a la cuenta de Rentia. Tú nunca manejas billetes.
       </p>
@@ -634,10 +704,10 @@ function Cobranza({ state, dispatch }) {
             key={i.id}
             onClick={() => dispatch({ tipo: "IR", pantalla: "cobranza", cobranzaId: i.id })}
             className={"shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition-colors " + (
-              i.id === inm.id ? "bg-bosque text-white" : "bg-white text-humo shadow-tarjeta"
+              i.id === inm.id ? "bg-primario text-white" : "bg-white text-humo shadow-tarjeta"
             )}
           >
-            {i.inquilino.nombre.split(" ")[0]} · {i.nombre.split(" · ")[1]}
+            {i.inquilino.nombre.split(" ")[0]} · {i.nombre.split(" · ")[1] || i.nombre}
           </button>
         ))}
       </div>
@@ -645,14 +715,17 @@ function Cobranza({ state, dispatch }) {
       {/* Estado del cobro */}
       <section className="bg-white rounded-2xl shadow-tarjeta p-5">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="font-bold text-tinta">{inm.inquilino.nombre}</h3>
-            <p className="text-xs text-humo mt-0.5">{inm.nombre} · {inm.inquilino.telefono}</p>
-            <p className="text-xs text-humo">Paga por {inm.inquilino.metodo === "efectivo" ? "efectivo" : "transferencia"} · canon <span className="num">{fmt(inm.canon)}</span> · día {inm.diaPago}</p>
+          <div className="flex items-start gap-3">
+            <Foto foto={inm.foto} tipo={inm.tipo} alt={"Foto de " + inm.nombre} className="w-14 h-14 rounded-xl object-cover shrink-0" />
+            <div>
+              <h3 className="font-bold text-tinta">{inm.inquilino.nombre}</h3>
+              <p className="text-xs text-humo mt-0.5">{inm.nombre} · {inm.inquilino.telefono}</p>
+              <p className="text-xs text-humo">Paga por {inm.inquilino.metodo === "efectivo" ? "efectivo" : "transferencia"} · canon <span className="num">{fmt(inm.canon)}</span> · día {inm.diaPago}</p>
+            </div>
           </div>
-          {inm.cobro.estado === "pagado" ? <Insignia tono="verde">Al día ✓</Insignia> :
-           inm.cobro.estado === "mora" ? <Insignia tono="rojo">En mora</Insignia> :
-           <Insignia tono="ambar">Cobrando</Insignia>}
+          {inm.cobro.estado === "pagado" ? <Insignia tono="positivo">Al día ✓</Insignia> :
+           inm.cobro.estado === "mora" ? <Insignia tono="mora">En mora</Insignia> :
+           <Insignia tono="proceso">Cobrando</Insignia>}
         </div>
 
         {/* Flujo del dinero */}
@@ -660,10 +733,10 @@ function Cobranza({ state, dispatch }) {
           {nodosFlujo.map((n, i) => (
             <div key={i} className="relative">
               <div className={"rounded-xl px-1 py-2.5 h-full " + (
-                i === 2 ? "bg-bosque text-white" : i === 3 ? "bg-brote text-bosque" : "bg-marfil text-tinta"
+                i === 2 ? "bg-primario text-white" : i === 3 ? "bg-tinte text-oscuro" : "bg-marfil text-tinta"
               )}>
                 <p className="text-[11px] font-bold leading-tight">{n.titulo}</p>
-                <p className={"text-[10px] mt-0.5 leading-tight " + (i === 2 ? "text-white/75" : "text-humo") + (i === 3 ? " text-bosque/80 font-semibold" : "")}>{n.detalle}</p>
+                <p className={"text-[10px] mt-0.5 leading-tight " + (i === 2 ? "text-white/75" : i === 3 ? "text-oscuro/80 font-semibold" : "text-humo")}>{n.detalle}</p>
               </div>
               {i < 3 && <span className="absolute top-1/2 -right-[7px] -translate-y-1/2 text-humo text-xs z-10" aria-hidden="true">▸</span>}
             </div>
@@ -679,7 +752,7 @@ function Cobranza({ state, dispatch }) {
       {/* Canal 1: link de pago */}
       <section className="bg-white rounded-2xl shadow-tarjeta p-5">
         <h3 className="font-bold text-tinta flex items-center gap-2">
-          <span className="w-8 h-8 rounded-lg bg-brote text-bosque flex items-center justify-center"><Icono d={IC.plata} className="w-5 h-5" /></span>
+          <span className="w-8 h-8 rounded-lg bg-tinte text-oscuro flex items-center justify-center"><Icono d={IC.plata} className="w-5 h-5" /></span>
           Link de pago
         </h3>
         <p className="text-sm text-humo mt-2">El inquilino paga con PSE, tarjeta o Nequi desde el celular.</p>
@@ -687,7 +760,7 @@ function Cobranza({ state, dispatch }) {
         <div className="mt-3 flex gap-2">
           <button
             onClick={() => dispatch({ tipo: "REGISTRAR_GESTION", id: inm.id, texto: "Link de pago reenviado por WhatsApp", toast: "Link enviado por WhatsApp a " + inm.inquilino.nombre.split(" ")[0] + "." })}
-            className="flex-1 rounded-xl bg-bosque text-white font-semibold text-sm py-3 hover:bg-selva transition-colors"
+            className="flex-1 rounded-xl bg-primario text-white font-semibold text-sm py-3 hover:bg-oscuro transition-colors"
           >
             Enviar por WhatsApp
           </button>
@@ -696,7 +769,7 @@ function Cobranza({ state, dispatch }) {
               try { navigator.clipboard.writeText("https://" + linkPago); } catch (e) {}
               dispatch({ tipo: "TOAST", texto: "Link copiado." });
             }}
-            className="rounded-xl border border-humo/25 text-tinta font-semibold text-sm px-4 hover:border-bosque transition-colors"
+            className="rounded-xl border border-humo/25 text-tinta font-semibold text-sm px-4 hover:border-primario transition-colors"
           >
             Copiar
           </button>
@@ -706,7 +779,7 @@ function Cobranza({ state, dispatch }) {
       {/* Canal 2: efectivo (la magia) */}
       <section className="bg-white rounded-2xl shadow-tarjeta p-5">
         <h3 className="font-bold text-tinta flex items-center gap-2">
-          <span className="w-8 h-8 rounded-lg bg-brote text-bosque flex items-center justify-center text-base" aria-hidden="true">🏪</span>
+          <span className="w-8 h-8 rounded-lg bg-tinte text-oscuro flex items-center justify-center text-base" aria-hidden="true">🏪</span>
           Pago en efectivo
         </h3>
         <p className="text-sm text-humo mt-2">
@@ -718,7 +791,7 @@ function Cobranza({ state, dispatch }) {
         ) : (
           <button
             onClick={() => dispatch({ tipo: "GENERAR_CODIGO", id: inm.id })}
-            className="mt-3 w-full rounded-xl bg-bosque text-white font-semibold text-sm py-3 hover:bg-selva transition-colors"
+            className="mt-3 w-full rounded-xl bg-primario text-white font-semibold text-sm py-3 hover:bg-oscuro transition-colors"
           >
             Generar código de efectivo
           </button>
@@ -732,7 +805,7 @@ function Cobranza({ state, dispatch }) {
         <ul className="mt-3 flex flex-col">
           {[...inm.cobro.gestiones].reverse().map((g, i) => (
             <li key={i} className="flex gap-3 py-2 border-b border-marfil last:border-0">
-              <span className="mt-1 w-2 h-2 rounded-full bg-menta shrink-0" aria-hidden="true"></span>
+              <span className="mt-1 w-2 h-2 rounded-full bg-primario shrink-0" aria-hidden="true"></span>
               <div>
                 <p className="text-sm text-tinta">{g.texto}</p>
                 <p className="text-xs text-humo num">{g.fecha}</p>
@@ -749,11 +822,11 @@ function Cobranza({ state, dispatch }) {
    Simulador (para el pitch)
    ============================================================ */
 const ESTILO_EVENTO = {
-  desembolso: { icono: "💚", clase: "bg-brote border-menta/30", titulo: "text-bosque" },
+  desembolso: { icono: "💰", clase: "bg-tinte border-primario/25", titulo: "text-oscuro" },
   pago:       { icono: "💵", clase: "bg-white border-marfil", titulo: "text-tinta" },
   gestion:    { icono: "📣", clase: "bg-white border-marfil", titulo: "text-tinta" },
-  escudo:     { icono: "🛡️", clase: "bg-bosque border-bosque", titulo: "text-white", oscuro: true },
-  alerta:     { icono: "⚠️", clase: "bg-rose-50 border-rose-200", titulo: "text-rose-800" },
+  escudo:     { icono: "🛡️", clase: "bg-tinta border-tinta", titulo: "text-white", oscuro: true },
+  alerta:     { icono: "⚠️", clase: "bg-amber-50 border-amber-200", titulo: "text-amber-900" },
 };
 
 function Simulador({ state, dispatch }) {
@@ -774,7 +847,7 @@ function Simulador({ state, dispatch }) {
           dispatch({ tipo: "AVANZAR_MES" });
           setTimeout(() => finRef.current && finRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" }), 60);
         }}
-        className="rounded-2xl bg-bosque text-white font-bold py-4 shadow-tarjeta hover:bg-selva transition-colors flex items-center justify-center gap-2 text-base"
+        className="rounded-2xl bg-primario text-white font-bold py-4 shadow-tarjeta hover:bg-oscuro transition-colors flex items-center justify-center gap-2 text-base"
       >
         <Icono d={IC.play} className="w-5 h-5" />
         Avanzar un mes → {cap(MESES[(mesIdx + 1) % 12])} {mesIdx === 11 ? anio + 1 : anio}
@@ -794,7 +867,7 @@ function Simulador({ state, dispatch }) {
       {sim && (
         <React.Fragment>
           {/* Resumen del dueño primero: la plata llegó */}
-          <section className="rounded-2xl bg-bosque text-white p-5 shadow-tarjeta">
+          <section className="rounded-2xl bg-primario text-white p-5 shadow-tarjeta">
             <p className="text-xs font-semibold uppercase tracking-wide text-white/70">{sim.resumen.mesNombre} · resultado para ti</p>
             <p className="text-3xl font-extrabold num mt-1.5 tracking-tight">{fmt(sim.resumen.totalAdelantado)}</p>
             <p className="text-sm text-white/85 mt-1">recibidos el día 1, antes de que ningún inquilino pagara.</p>
@@ -827,9 +900,9 @@ function Simulador({ state, dispatch }) {
           <section ref={finRef} className="bg-white rounded-2xl shadow-tarjeta p-5">
             <h3 className="font-bold text-tinta">Moraleja del mes</h3>
             <div className="mt-3 grid grid-cols-2 gap-3 text-center">
-              <div className="rounded-xl bg-brote px-3 py-4">
+              <div className="rounded-xl bg-tinte px-3 py-4">
                 <p className="text-2xl" aria-hidden="true">😌</p>
-                <p className="text-sm font-bold text-bosque mt-1">El dueño</p>
+                <p className="text-sm font-bold text-oscuro mt-1">El dueño</p>
                 <p className="text-xs text-humo mt-1">Recibió su plata el día 1 y no llamó a nadie.</p>
               </div>
               <div className="rounded-xl bg-marfil px-3 py-4">
@@ -849,7 +922,7 @@ function Simulador({ state, dispatch }) {
 }
 
 /* ============================================================
-   Onboarding del dueño (3 pasos)
+   Onboarding del dueño (2 pasos, sin fricción)
    ============================================================ */
 const Campo = ({ etiqueta, children }) => (
   <label className="block">
@@ -858,29 +931,36 @@ const Campo = ({ etiqueta, children }) => (
   </label>
 );
 
-const claseInput = "w-full rounded-xl border border-humo/25 bg-white px-3.5 py-3 text-sm text-tinta placeholder-humo/60 focus:outline-none focus:ring-2 focus:ring-bosque/40 focus:border-bosque";
+const claseInput = "w-full rounded-xl border border-humo/25 bg-white px-3.5 py-3 text-sm text-tinta placeholder-humo/60 focus:outline-none focus:ring-2 focus:ring-primario/40 focus:border-primario";
 
 function Onboarding({ state, dispatch }) {
   const [paso, setPaso] = useState(1);
   const [listo, setListo] = useState(false);
   const [f, setF] = useState({
-    nombre: "", direccion: "", canon: 0, diaPago: 5,
+    tipo: "apartamento", direccion: "", canon: 0, diaPago: 5,
     inqNombre: "", inqTelefono: "", metodo: "transferencia",
     plan: "garantizado",
   });
   const set = (campo) => (e) => setF({ ...f, [campo]: e.target.value });
   const canonValido = f.canon >= 100000;
-  const paso1Ok = f.nombre.trim() && f.direccion.trim() && canonValido;
+  const paso1Ok = f.direccion.trim() && canonValido;
   const paso2Ok = f.inqNombre.trim() && f.inqTelefono.trim();
 
+  const nuevoId = Math.max(...state.inmuebles.map((i) => i.id)) + 1;
+  const nombre = TIPOS[f.tipo].label + " · " + (f.direccion.trim().split(",")[0] || "");
+  const fotoNueva = fotoDe("rentia-" + f.tipo + "-" + nuevoId);
+  const tarifaG = canonValido ? tarifaDe(Number(f.canon), "garantizado") : null;
+  const tarifaC = canonValido ? tarifaDe(Number(f.canon), "gestion") : null;
+
   const confirmar = () => {
-    const id = Math.max(...state.inmuebles.map((i) => i.id)) + 1;
     dispatch({
       tipo: "AGREGAR_INMUEBLE",
       inmueble: {
-        id,
-        nombre: f.nombre.trim(),
+        id: nuevoId,
+        tipo: f.tipo,
+        nombre,
         direccion: f.direccion.trim(),
+        foto: fotoNueva,
         canon: Number(f.canon),
         diaPago: Number(f.diaPago),
         plan: f.plan,
@@ -891,87 +971,106 @@ function Onboarding({ state, dispatch }) {
           : { estado: "pendiente", texto: "Te transferimos apenas recaudemos" },
         cobro: {
           estado: "cobrando",
-          texto: "Le dimos la bienvenida a " + f.inqNombre.trim().split(" ")[0] + " y activamos el cobro",
+          texto: "Estudio de " + f.inqNombre.trim().split(" ")[0] + " aprobado · cobro activado",
           codigo: null,
-          gestiones: [{ fecha: "hoy", texto: "Bienvenida enviada al inquilino por WhatsApp con sus opciones de pago" }],
+          gestiones: [
+            { fecha: "hoy", texto: "Estudio del inquilino aprobado (" + fmt(ESTUDIO) + ", única vez)" },
+            { fecha: "hoy", texto: "Bienvenida enviada al inquilino por WhatsApp con sus opciones de pago" },
+          ],
         },
         historial: [],
       },
     });
   };
 
-  const tarifaG = canonValido ? tarifaDe(Number(f.canon), "garantizado") : null;
-  const tarifaC = canonValido ? tarifaDe(Number(f.canon), "gestion") : null;
-
   return (
     <div className="fixed inset-0 z-40 bg-tinta/40 flex items-end sm:items-center justify-center" role="dialog" aria-modal="true" aria-label="Registrar inmueble">
       <div className="bg-marfil w-full max-w-md rounded-t-3xl sm:rounded-3xl max-h-[92vh] overflow-y-auto">
-        <div className="sticky top-0 bg-marfil px-6 pt-5 pb-3 flex items-center justify-between">
+        <div className="sticky top-0 bg-marfil px-6 pt-5 pb-3 flex items-center justify-between z-10">
           <div>
             <h2 className="font-bold text-tinta text-lg">{listo ? "¡Todo listo!" : "Nuevo inmueble"}</h2>
-            {!listo && <p className="text-xs text-humo">Paso {paso} de 3 · {["el inmueble", "el inquilino", "tu plan"][paso - 1]}</p>}
+            {!listo && <p className="text-xs text-humo">Paso {paso} de 2 · {["tu inmueble", "inquilino y plan"][paso - 1]}</p>}
           </div>
           <button onClick={() => dispatch({ tipo: "CERRAR_ONBOARDING" })} className="text-humo hover:text-tinta text-sm font-semibold px-2 py-1" aria-label="Cerrar">✕</button>
         </div>
 
         {!listo && (
           <div className="px-6 flex gap-1.5" aria-hidden="true">
-            {[1, 2, 3].map((p) => (
-              <div key={p} className={"h-1.5 flex-1 rounded-full " + (p <= paso ? "bg-bosque" : "bg-humo/20")}></div>
+            {[1, 2].map((p) => (
+              <div key={p} className={"h-1.5 flex-1 rounded-full " + (p <= paso ? "bg-primario" : "bg-humo/20")}></div>
             ))}
           </div>
         )}
 
         <div className="px-6 py-5 flex flex-col gap-4">
           {listo ? (
-            <div className="text-center py-6">
-              <div className="mx-auto w-16 h-16 rounded-full bg-brote text-bosque flex items-center justify-center">
-                <Icono d={IC.cheque} className="w-9 h-9" />
+            <div className="text-center py-4">
+              <Foto foto={fotoNueva} tipo={f.tipo} alt={"Foto de " + nombre} className="w-full h-36 object-cover rounded-2xl" />
+              <div className="mx-auto w-14 h-14 -mt-7 relative rounded-full bg-primario text-white flex items-center justify-center border-4 border-marfil">
+                <Icono d={IC.cheque} className="w-8 h-8" />
               </div>
-              <h3 className="font-bold text-tinta text-xl mt-4">{f.nombre}</h3>
+              <h3 className="font-bold text-tinta text-xl mt-2">{nombre}</h3>
               <p className="text-sm text-humo mt-2 max-w-xs mx-auto">
                 {f.plan === "garantizado"
-                  ? "Tu arriendo queda garantizado. El primer adelanto de " + fmt(Number(f.canon) - tarifaG) + " llega a tu cuenta el 1 de " + MESES[(state.mesIdx + 1) % 12] + "."
+                  ? "Tu arriendo queda garantizado. El primer adelanto de " + fmt(Number(f.canon) - tarifaG) + " llega el 1 de " + MESES[(state.mesIdx + 1) % 12] + "."
                   : "Activamos la gestión de cobro. Te transferimos " + fmt(Number(f.canon) - tarifaC) + " apenas " + f.inqNombre.split(" ")[0] + " pague."}
               </p>
-              <button onClick={confirmar} className="mt-6 w-full rounded-xl bg-bosque text-white font-bold py-3.5 hover:bg-selva transition-colors">
+              <p className="text-xs text-humo mt-2">Hoy solo pagas el estudio del inquilino: {fmt(ESTUDIO)}, una única vez.</p>
+              <button onClick={confirmar} className="mt-5 w-full rounded-xl bg-primario text-white font-bold py-3.5 hover:bg-oscuro transition-colors">
                 Ir a mi tablero
               </button>
             </div>
           ) : paso === 1 ? (
             <React.Fragment>
-              <Campo etiqueta="Nombre corto del inmueble">
-                <input className={claseInput} placeholder="Ej: Apto 501 · Cedritos" value={f.nombre} onChange={set("nombre")} />
+              <Campo etiqueta="¿Qué arriendas?">
+                <div className="grid grid-cols-3 gap-2">
+                  {Object.entries(TIPOS).map(([clave, t]) => (
+                    <button key={clave} type="button" onClick={() => setF({ ...f, tipo: clave })}
+                      className={"rounded-xl border-2 px-2 py-2.5 text-center transition-colors " + (
+                        f.tipo === clave ? "border-primario bg-tinte" : "border-humo/20 bg-white"
+                      )}>
+                      <p className="text-xl" aria-hidden="true">{t.emoji}</p>
+                      <p className="text-[11px] font-bold text-tinta mt-0.5">{t.label}</p>
+                    </button>
+                  ))}
+                </div>
               </Campo>
+              <Foto foto={fotoDe("rentia-" + f.tipo + "-" + nuevoId)} tipo={f.tipo} alt={"Foto de ejemplo: " + TIPOS[f.tipo].label} className="w-full h-28 object-cover rounded-xl" />
               <Campo etiqueta="Dirección">
                 <input className={claseInput} placeholder="Ej: Cl 140 # 12-34, Bogotá" value={f.direccion} onChange={set("direccion")} />
               </Campo>
-              <Campo etiqueta="Valor del arriendo (canon mensual)">
-                <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-humo text-sm">$</span>
-                  <input
-                    className={claseInput + " pl-8 num"}
-                    inputMode="numeric"
-                    placeholder="1.500.000"
-                    value={f.canon ? Number(f.canon).toLocaleString("es-CO") : ""}
-                    onChange={(e) => setF({ ...f, canon: Number(e.target.value.replace(/\D/g, "")) })}
-                  />
+              <div className="grid grid-cols-5 gap-2">
+                <div className="col-span-3">
+                  <Campo etiqueta="Arriendo mensual">
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-humo text-sm">$</span>
+                      <input
+                        className={claseInput + " pl-8 num"}
+                        inputMode="numeric"
+                        placeholder="1.500.000"
+                        value={f.canon ? Number(f.canon).toLocaleString("es-CO") : ""}
+                        onChange={(e) => setF({ ...f, canon: Number(e.target.value.replace(/\D/g, "")) })}
+                      />
+                    </div>
+                  </Campo>
                 </div>
-                {!canonValido && f.canon > 0 && <p className="text-xs text-rose-600 mt-1">Ingresa un canon de al menos $ 100.000.</p>}
-              </Campo>
-              <Campo etiqueta="Día de pago acordado con el inquilino">
-                <select className={claseInput} value={f.diaPago} onChange={set("diaPago")}>
-                  {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
-                    <option key={d} value={d}>Día {d} de cada mes</option>
-                  ))}
-                </select>
-              </Campo>
+                <div className="col-span-2">
+                  <Campo etiqueta="Día de pago">
+                    <select className={claseInput} value={f.diaPago} onChange={set("diaPago")}>
+                      {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+                        <option key={d} value={d}>Día {d}</option>
+                      ))}
+                    </select>
+                  </Campo>
+                </div>
+              </div>
+              {!canonValido && f.canon > 0 && <p className="text-xs text-primario -mt-2">Ingresa un arriendo de al menos $ 100.000.</p>}
               <button disabled={!paso1Ok} onClick={() => setPaso(2)}
-                className="mt-2 rounded-xl bg-bosque text-white font-bold py-3.5 disabled:opacity-40 hover:bg-selva transition-colors">
+                className="mt-1 rounded-xl bg-primario text-white font-bold py-3.5 disabled:opacity-40 hover:bg-oscuro transition-colors">
                 Continuar
               </button>
             </React.Fragment>
-          ) : paso === 2 ? (
+          ) : (
             <React.Fragment>
               <Campo etiqueta="Nombre del inquilino">
                 <input className={claseInput} placeholder="Ej: Andrés Gómez" value={f.inqNombre} onChange={set("inqNombre")} />
@@ -979,15 +1078,15 @@ function Onboarding({ state, dispatch }) {
               <Campo etiqueta="Teléfono (WhatsApp)">
                 <input className={claseInput} inputMode="tel" placeholder="Ej: 300 123 4567" value={f.inqTelefono} onChange={set("inqTelefono")} />
               </Campo>
-              <Campo etiqueta="¿Cómo paga normalmente?">
+              <Campo etiqueta="¿Cómo paga?">
                 <div className="grid grid-cols-2 gap-2">
                   {[
                     ["transferencia", "🏦 Transferencia", "Nequi, PSE o banco"],
-                    ["efectivo", "💵 Efectivo", "Le damos código Efecty/Baloto"],
+                    ["efectivo", "💵 Efectivo", "Código Efecty/Baloto"],
                   ].map(([valor, titulo, det]) => (
                     <button key={valor} type="button" onClick={() => setF({ ...f, metodo: valor })}
                       className={"rounded-xl border-2 px-3 py-3 text-left transition-colors " + (
-                        f.metodo === valor ? "border-bosque bg-brote" : "border-humo/20 bg-white"
+                        f.metodo === valor ? "border-primario bg-tinte" : "border-humo/20 bg-white"
                       )}>
                       <p className="text-sm font-bold text-tinta">{titulo}</p>
                       <p className="text-[11px] text-humo mt-0.5">{det}</p>
@@ -995,46 +1094,40 @@ function Onboarding({ state, dispatch }) {
                   ))}
                 </div>
               </Campo>
-              <p className="text-xs text-humo bg-white rounded-xl px-3.5 py-3">
-                Sea como sea que pague, el dinero entra a Rentia y a ti te llega por transferencia. Nunca recibes efectivo.
-              </p>
-              <div className="mt-2 flex gap-2">
-                <button onClick={() => setPaso(1)} className="rounded-xl border border-humo/25 text-tinta font-semibold px-5 py-3.5">Atrás</button>
-                <button disabled={!paso2Ok} onClick={() => setPaso(3)}
-                  className="flex-1 rounded-xl bg-bosque text-white font-bold py-3.5 disabled:opacity-40 hover:bg-selva transition-colors">
-                  Continuar
-                </button>
-              </div>
-            </React.Fragment>
-          ) : (
-            <React.Fragment>
-              <button type="button" onClick={() => setF({ ...f, plan: "garantizado" })}
-                className={"rounded-2xl border-2 p-4 text-left transition-colors " + (f.plan === "garantizado" ? "border-bosque bg-white" : "border-humo/20 bg-white/60")}>
-                <div className="flex items-center justify-between">
-                  <p className="font-bold text-tinta">Arriendo Garantizado</p>
-                  <Insignia tono="verde">Recomendado</Insignia>
+
+              <Campo etiqueta="Tu plan">
+                <div className="flex flex-col gap-2">
+                  <button type="button" onClick={() => setF({ ...f, plan: "garantizado" })}
+                    className={"rounded-2xl border-2 p-4 text-left transition-colors " + (f.plan === "garantizado" ? "border-primario bg-white" : "border-humo/20 bg-white/60")}>
+                    <div className="flex items-center justify-between">
+                      <p className="font-bold text-tinta">Arriendo Garantizado</p>
+                      <Insignia tono="positivo">Recomendado</Insignia>
+                    </div>
+                    <p className="text-sm text-humo mt-1">Te pagamos el día 1, pase lo que pase.</p>
+                    <p className="text-sm font-bold text-primario mt-1.5 num">
+                      {tarifaG ? fmt(tarifaG) + "/mes · recibes " + fmt(Number(f.canon) - tarifaG) : "7% del arriendo cada mes"}
+                    </p>
+                    <p className="text-[11px] text-humo mt-0.5 num">5% tarifa de garantía + 2% por el adelanto del día 1</p>
+                  </button>
+                  <button type="button" onClick={() => setF({ ...f, plan: "gestion" })}
+                    className={"rounded-2xl border-2 p-4 text-left transition-colors " + (f.plan === "gestion" ? "border-primario bg-white" : "border-humo/20 bg-white/60")}>
+                    <p className="font-bold text-tinta">Solo Gestión de Cobro</p>
+                    <p className="text-sm text-humo mt-1">Cobramos por ti; te pagamos cuando el inquilino pague.</p>
+                    <p className="text-sm font-bold text-tinta mt-1.5 num">
+                      {tarifaC ? fmt(tarifaC) + "/mes · recibes " + fmt(Number(f.canon) - tarifaC) : "4% del arriendo cada mes"}
+                    </p>
+                  </button>
                 </div>
-                <p className="text-sm text-humo mt-1.5">
-                  Te adelantamos el arriendo <strong className="text-tinta">el día 1 de cada mes, pase lo que pase</strong>. Si el inquilino se atrasa o no paga, el riesgo es nuestro.
-                </p>
-                <p className="text-sm font-bold text-bosque mt-2 num">
-                  {tarifaG ? "Tarifa fija: " + fmt(tarifaG) + "/mes · recibes " + fmt(Number(f.canon) - tarifaG) : "Tarifa fija mensual del 8% del canon"}
-                </p>
-              </button>
-              <button type="button" onClick={() => setF({ ...f, plan: "gestion" })}
-                className={"rounded-2xl border-2 p-4 text-left transition-colors " + (f.plan === "gestion" ? "border-bosque bg-white" : "border-humo/20 bg-white/60")}>
-                <p className="font-bold text-tinta">Solo Gestión de Cobro</p>
-                <p className="text-sm text-humo mt-1.5">
-                  Nosotros perseguimos el pago por ti (recordatorios, llamadas, efectivo) y te transferimos <strong className="text-tinta">cuando el inquilino pague</strong>.
-                </p>
-                <p className="text-sm font-bold text-tinta mt-2 num">
-                  {tarifaC ? "Tarifa: " + fmt(tarifaC) + "/mes · recibes " + fmt(Number(f.canon) - tarifaC) : "Tarifa mensual del 4% del canon"}
-                </p>
-              </button>
-              <div className="mt-2 flex gap-2">
-                <button onClick={() => setPaso(2)} className="rounded-xl border border-humo/25 text-tinta font-semibold px-5 py-3.5">Atrás</button>
-                <button onClick={() => setListo(true)}
-                  className="flex-1 rounded-xl bg-bosque text-white font-bold py-3.5 hover:bg-selva transition-colors">
+              </Campo>
+              <p className="text-xs text-humo bg-white rounded-xl px-3.5 py-3">
+                <strong className="text-tinta">Cobramos una tarifa de garantía; a cambio, asumimos el riesgo de que no te paguen.</strong>
+                {" "}Ambos planes incluyen estudio del inquilino: {fmt(ESTUDIO)}, una sola vez.
+              </p>
+
+              <div className="mt-1 flex gap-2">
+                <button onClick={() => setPaso(1)} className="rounded-xl border border-humo/25 text-tinta font-semibold px-5 py-3.5">Atrás</button>
+                <button disabled={!paso2Ok} onClick={() => setListo(true)}
+                  className="flex-1 rounded-xl bg-primario text-white font-bold py-3.5 disabled:opacity-40 hover:bg-oscuro transition-colors">
                   {f.plan === "garantizado" ? "Garantizar mi arriendo" : "Activar gestión de cobro"}
                 </button>
               </div>
@@ -1063,7 +1156,7 @@ function App() {
     <div className="min-h-screen bg-marfil max-w-md mx-auto shadow-2xl relative">
       <header className="sticky top-0 z-30 bg-marfil/95 backdrop-blur px-5 pt-4 pb-3 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-bosque text-white flex items-center justify-center font-extrabold text-lg" aria-hidden="true">R</div>
+          <div className="w-9 h-9 rounded-xl bg-primario text-white flex items-center justify-center font-extrabold text-lg" aria-hidden="true">R</div>
           <div>
             <p className="font-extrabold text-tinta leading-none tracking-tight">Rentia</p>
             <p className="text-[11px] text-humo leading-tight mt-0.5">Tu arriendo, garantizado</p>
@@ -1086,7 +1179,7 @@ function App() {
           {tabs.map((t) => (
             <button key={t.id} onClick={() => dispatch({ tipo: "IR", pantalla: t.id })}
               className={"flex flex-col items-center gap-1 py-2.5 text-[11px] font-semibold transition-colors " + (
-                pantalla === t.id ? "text-bosque" : "text-humo hover:text-tinta"
+                pantalla === t.id ? "text-primario" : "text-humo hover:text-tinta"
               )}
               aria-current={pantalla === t.id ? "page" : undefined}>
               <Icono d={t.icono} className="w-6 h-6" stroke={pantalla === t.id ? 2.2 : 1.8} />
@@ -1095,7 +1188,7 @@ function App() {
           ))}
           <button onClick={() => dispatch({ tipo: "ABRIR_ONBOARDING" })}
             className="flex flex-col items-center gap-1 py-2.5 text-[11px] font-semibold text-humo hover:text-tinta transition-colors">
-            <span className="w-6 h-6 rounded-lg bg-bosque text-white flex items-center justify-center"><Icono d={IC.mas} className="w-4 h-4" stroke={2.4} /></span>
+            <span className="w-6 h-6 rounded-lg bg-primario text-white flex items-center justify-center"><Icono d={IC.mas} className="w-4 h-4" stroke={2.4} /></span>
             Agregar
           </button>
         </div>
