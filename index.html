@@ -1,0 +1,1113 @@
+<!DOCTYPE html>
+<html lang="es-CO">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rentia — Tu arriendo, garantizado</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bosque: '#0A4A3F',
+            selva: '#0E5F4E',
+            menta: '#16A97A',
+            brote: '#E8F4EE',
+            tinta: '#152420',
+            humo: '#5F6E68',
+            marfil: '#F4F7F5',
+          },
+          boxShadow: {
+            tarjeta: '0 1px 2px rgba(21,36,32,.06), 0 4px 14px rgba(21,36,32,.05)',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    html { background: #E5EBE8; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    .num { font-variant-numeric: tabular-nums; }
+    .codigo-barras {
+      height: 44px;
+      background: repeating-linear-gradient(90deg,
+        #152420 0px, #152420 2px, transparent 2px, transparent 5px,
+        #152420 5px, #152420 6px, transparent 6px, transparent 11px,
+        #152420 11px, #152420 14px, transparent 14px, transparent 17px);
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+const { useState, useReducer, useEffect, useRef } = React;
+
+/* ============================================================
+   Utilidades
+   ============================================================ */
+const fmt = (n) => "$ " + Math.round(n).toLocaleString("es-CO");
+const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const TARIFA_PCT = { garantizado: 0.08, gestion: 0.04 };
+const tarifaDe = (canon, plan) => Math.round((canon * TARIFA_PCT[plan]) / 1000) * 1000;
+const netoDe = (inm) => inm.canon - tarifaDe(inm.canon, inm.plan);
+
+/* ============================================================
+   Datos de ejemplo precargados (julio 2026, hoy es 4 de julio)
+   ============================================================ */
+const INMUEBLES_INICIALES = [
+  {
+    id: 1,
+    nombre: "Apto 302 · Chapinero",
+    direccion: "Cra 9 # 60-21, Bogotá",
+    canon: 1800000,
+    diaPago: 5,
+    plan: "garantizado",
+    perfil: "cumplido",
+    inquilino: { nombre: "María Fernanda Rojas", telefono: "301 456 7890", metodo: "transferencia" },
+    desembolso: { estado: "adelantado", texto: "Adelantado el 1 de julio" },
+    cobro: {
+      estado: "pagado",
+      texto: "María pagó el 3 de julio con el link de pago",
+      codigo: null,
+      gestiones: [
+        { fecha: "1 jul", texto: "Recordatorio automático enviado por WhatsApp" },
+        { fecha: "3 jul", texto: "Pago recibido por link de pago · " + fmt(1800000) },
+      ],
+    },
+    historial: [
+      { fecha: "1 abr", concepto: "Adelanto Rentia", monto: 1656000 },
+      { fecha: "1 may", concepto: "Adelanto Rentia", monto: 1656000 },
+      { fecha: "1 jun", concepto: "Adelanto Rentia", monto: 1656000 },
+      { fecha: "1 jul", concepto: "Adelanto Rentia", monto: 1656000 },
+    ],
+  },
+  {
+    id: 2,
+    nombre: "Casa 2 pisos · Suba",
+    direccion: "Cl 139 # 91-40, Bogotá",
+    canon: 1200000,
+    diaPago: 10,
+    plan: "garantizado",
+    perfil: "efectivo",
+    inquilino: { nombre: "Carlos Peña", telefono: "310 222 8845", metodo: "efectivo" },
+    desembolso: { estado: "adelantado", texto: "Adelantado el 1 de julio" },
+    cobro: {
+      estado: "cobrando",
+      texto: "Cobrando a Carlos — código de efectivo activo",
+      codigo: { convenio: "94512", ref: "7412 0038 6620", valor: 1200000, vence: "10 de julio" },
+      gestiones: [
+        { fecha: "1 jul", texto: "Recordatorio automático enviado por WhatsApp" },
+        { fecha: "2 jul", texto: "Código de pago en efectivo generado (Efecty · Baloto)" },
+      ],
+    },
+    historial: [
+      { fecha: "1 may", concepto: "Adelanto Rentia", monto: 1104000 },
+      { fecha: "1 jun", concepto: "Adelanto Rentia", monto: 1104000 },
+      { fecha: "1 jul", concepto: "Adelanto Rentia", monto: 1104000 },
+    ],
+  },
+  {
+    id: 3,
+    nombre: "Local comercial · Kennedy",
+    direccion: "Cl 38 sur # 78-15, Bogotá",
+    canon: 950000,
+    diaPago: 5,
+    plan: "gestion",
+    perfil: "riesgo",
+    inquilino: { nombre: "Deisy Muñoz", telefono: "320 903 1174", metodo: "transferencia" },
+    desembolso: { estado: "pendiente", texto: "Te transferimos apenas recaudemos" },
+    cobro: {
+      estado: "mora",
+      texto: "Deisy está en mora desde el 5 de junio",
+      codigo: null,
+      gestiones: [
+        { fecha: "5 jun", texto: "Recordatorio automático enviado por WhatsApp" },
+        { fecha: "9 jun", texto: "Llamada de nuestro equipo de cobranza" },
+        { fecha: "18 jun", texto: "Compromiso de pago acordado con la inquilina" },
+        { fecha: "1 jul", texto: "Nuevo recordatorio y visita programada" },
+      ],
+    },
+    historial: [
+      { fecha: "22 abr", concepto: "Recaudo transferido", monto: 912000 },
+      { fecha: "20 may", concepto: "Recaudo transferido", monto: 912000 },
+    ],
+  },
+];
+
+/* ============================================================
+   Simulador: guiones de comportamiento por inquilino
+   ============================================================ */
+const ESCENARIOS = {
+  cumplido: ["puntual", "puntual", "tarde"],
+  efectivo: ["tarde", "puntual", "tarde"],
+  riesgo:   ["mora", "tarde", "mora"],
+  nuevo:    ["puntual", "tarde", "puntual"],
+};
+
+function simularMes(inmuebles, mesIdxNuevo, anio) {
+  const mesNombre = cap(MESES[mesIdxNuevo]) + " " + anio;
+  const mesAbrev = MESES[mesIdxNuevo].slice(0, 3);
+  const eventos = [];
+  let totalAdelantado = 0;
+  let gestionesHechas = 0;
+
+  const nuevos = inmuebles.map((inm) => {
+    const tarifa = tarifaDe(inm.canon, inm.plan);
+    const neto = inm.canon - tarifa;
+    const esc = ESCENARIOS[inm.perfil][mesIdxNuevo % 3];
+    const viaPago = inm.inquilino.metodo === "efectivo"
+      ? "en efectivo en un punto Efecty"
+      : "por link de pago";
+    const historial = [...inm.historial];
+    const gestiones = [];
+    let cobro, desembolso;
+
+    // Día 1: si el plan es garantizado, el dueño recibe su plata pase lo que pase
+    if (inm.plan === "garantizado") {
+      eventos.push({
+        dia: 1, tipo: "desembolso",
+        titulo: "Adelantamos " + fmt(neto) + " a tu cuenta",
+        detalle: inm.nombre + " · canon " + fmt(inm.canon) + " − tarifa " + fmt(tarifa),
+      });
+      historial.push({ fecha: "1 " + mesAbrev, concepto: "Adelanto Rentia", monto: neto });
+      totalAdelantado += neto;
+      desembolso = { estado: "adelantado", texto: "Adelantado el 1 de " + MESES[mesIdxNuevo] };
+    }
+
+    if (esc === "puntual") {
+      const dia = Math.max(2, inm.diaPago - 1);
+      eventos.push({
+        dia, tipo: "pago",
+        titulo: inm.inquilino.nombre.split(" ")[0] + " pagó " + viaPago,
+        detalle: inm.nombre + " · " + fmt(inm.canon) + " entró a la cuenta de Rentia",
+      });
+      gestiones.push({ fecha: dia + " " + mesAbrev, texto: "Pago recibido " + viaPago + " · " + fmt(inm.canon) });
+      cobro = { estado: "pagado", texto: inm.inquilino.nombre.split(" ")[0] + " pagó el " + dia + " de " + MESES[mesIdxNuevo], codigo: null, gestiones };
+      if (inm.plan === "gestion") {
+        eventos.push({
+          dia: dia + 1, tipo: "desembolso",
+          titulo: "Te transferimos el recaudo: " + fmt(neto),
+          detalle: inm.nombre + " · canon " + fmt(inm.canon) + " − tarifa " + fmt(tarifa),
+        });
+        historial.push({ fecha: (dia + 1) + " " + mesAbrev, concepto: "Recaudo transferido", monto: neto });
+        desembolso = { estado: "pagado", texto: "Transferido el " + (dia + 1) + " de " + MESES[mesIdxNuevo] };
+      }
+    }
+
+    if (esc === "tarde") {
+      const d1 = inm.diaPago, d2 = inm.diaPago + 4, d3 = inm.diaPago + 9;
+      eventos.push({ dia: d1, tipo: "gestion", titulo: "Recordatorio por WhatsApp a " + inm.inquilino.nombre.split(" ")[0], detalle: inm.nombre + " · no ha pagado y hoy es su fecha límite" });
+      eventos.push({ dia: d2, tipo: "gestion", titulo: "Nuestro equipo llamó a " + inm.inquilino.nombre.split(" ")[0], detalle: inm.nombre + " · se comprometió a pagar esta semana" });
+      if (inm.inquilino.metodo === "efectivo") {
+        eventos.push({ dia: d2, tipo: "gestion", titulo: "Le enviamos un código para pagar en efectivo", detalle: "Válido en Efecty, Baloto y SuperGIROS" });
+        gestionesHechas++;
+      }
+      eventos.push({
+        dia: d3, tipo: "pago",
+        titulo: inm.inquilino.nombre.split(" ")[0] + " pagó (tarde) " + viaPago,
+        detalle: inm.nombre + " · " + fmt(inm.canon) + " entró a la cuenta de Rentia",
+      });
+      gestionesHechas += 2;
+      gestiones.push({ fecha: d1 + " " + mesAbrev, texto: "Recordatorio automático enviado por WhatsApp" });
+      gestiones.push({ fecha: d2 + " " + mesAbrev, texto: "Llamada de nuestro equipo de cobranza" });
+      gestiones.push({ fecha: d3 + " " + mesAbrev, texto: "Pago recibido " + viaPago + " · " + fmt(inm.canon) });
+      cobro = { estado: "pagado", texto: inm.inquilino.nombre.split(" ")[0] + " pagó tarde, el " + d3 + " de " + MESES[mesIdxNuevo], codigo: null, gestiones };
+      if (inm.plan === "garantizado") {
+        eventos.push({
+          dia: d3, tipo: "escudo",
+          titulo: "A ti no te afectó el retraso",
+          detalle: inm.nombre + " · tu adelanto llegó el día 1, nueve días antes de este pago",
+        });
+      } else {
+        eventos.push({
+          dia: d3 + 1, tipo: "desembolso",
+          titulo: "Te transferimos el recaudo: " + fmt(neto),
+          detalle: inm.nombre + " · llegó tarde porque el plan Solo Gestión depende del inquilino",
+        });
+        historial.push({ fecha: (d3 + 1) + " " + mesAbrev, concepto: "Recaudo transferido", monto: neto });
+        desembolso = { estado: "pagado", texto: "Transferido el " + (d3 + 1) + " de " + MESES[mesIdxNuevo] };
+      }
+    }
+
+    if (esc === "mora") {
+      const d1 = inm.diaPago, d2 = inm.diaPago + 4, d3 = inm.diaPago + 10;
+      eventos.push({ dia: d1, tipo: "gestion", titulo: "Recordatorio por WhatsApp a " + inm.inquilino.nombre.split(" ")[0], detalle: inm.nombre + " · fecha límite de pago" });
+      eventos.push({ dia: d2, tipo: "gestion", titulo: "Llamada de cobranza a " + inm.inquilino.nombre.split(" ")[0], detalle: inm.nombre + " · sin respuesta, se agenda seguimiento" });
+      eventos.push({ dia: d3, tipo: "gestion", titulo: "Compromiso de pago firmado", detalle: inm.nombre + " · acuerdo para ponerse al día el próximo mes" });
+      gestionesHechas += 3;
+      gestiones.push({ fecha: d1 + " " + mesAbrev, texto: "Recordatorio automático enviado por WhatsApp" });
+      gestiones.push({ fecha: d2 + " " + mesAbrev, texto: "Llamada de nuestro equipo de cobranza" });
+      gestiones.push({ fecha: d3 + " " + mesAbrev, texto: "Compromiso de pago acordado" });
+      cobro = { estado: "mora", texto: inm.inquilino.nombre.split(" ")[0] + " quedó en mora este mes — seguimos gestionando", codigo: null, gestiones };
+      if (inm.plan === "garantizado") {
+        eventos.push({
+          dia: 28, tipo: "escudo",
+          titulo: "Mora del inquilino: Rentia asume el riesgo",
+          detalle: inm.nombre + " · tu adelanto del día 1 no se toca. La cobranza es problema nuestro.",
+        });
+      } else {
+        eventos.push({
+          dia: 28, tipo: "alerta",
+          titulo: "Sin recaudo este mes en " + inm.nombre,
+          detalle: "Con Arriendo Garantizado habrías recibido " + fmt(inm.canon - tarifaDe(inm.canon, "garantizado")) + " el día 1.",
+        });
+        desembolso = { estado: "pendiente", texto: "Pendiente: la inquilina está en mora" };
+      }
+    }
+
+    return { ...inm, historial, cobro, desembolso };
+  });
+
+  eventos.sort((a, b) => a.dia - b.dia);
+  return {
+    inmuebles: nuevos,
+    eventos,
+    resumen: { mesNombre, totalAdelantado, gestionesHechas },
+  };
+}
+
+/* ============================================================
+   Estado global
+   ============================================================ */
+const estadoInicial = {
+  pantalla: "inicio",           // inicio | cobranza | simulador
+  mesIdx: 6,                    // julio
+  anio: 2026,
+  inmuebles: INMUEBLES_INICIALES,
+  cobranzaId: 2,
+  sim: null,                    // { eventos, resumen } del último mes simulado
+  mesesSimulados: 0,
+  onboarding: false,
+  toast: null,
+};
+
+function reducer(state, accion) {
+  switch (accion.tipo) {
+    case "IR": {
+      const s = { ...state, pantalla: accion.pantalla };
+      if (accion.cobranzaId) s.cobranzaId = accion.cobranzaId;
+      return s;
+    }
+    case "ABRIR_ONBOARDING":
+      return { ...state, onboarding: true };
+    case "CERRAR_ONBOARDING":
+      return { ...state, onboarding: false };
+    case "AGREGAR_INMUEBLE": {
+      const inm = accion.inmueble;
+      return {
+        ...state,
+        inmuebles: [...state.inmuebles, inm],
+        onboarding: false,
+        pantalla: "inicio",
+        toast: inm.plan === "garantizado"
+          ? "¡Listo! Tu primer adelanto llega el 1 de " + MESES[(state.mesIdx + 1) % 12] + "."
+          : "¡Listo! Empezamos a gestionar el cobro de este arriendo.",
+      };
+    }
+    case "GENERAR_CODIGO": {
+      const inmuebles = state.inmuebles.map((inm) => {
+        if (inm.id !== accion.id) return inm;
+        const ref = String(700000000000 + inm.id * 7919137 + state.mesIdx * 104729)
+          .slice(0, 12).replace(/(\d{4})(?=\d)/g, "$1 ");
+        return {
+          ...inm,
+          cobro: {
+            ...inm.cobro,
+            codigo: { convenio: "94512", ref, valor: inm.canon, vence: inm.diaPago + " de " + MESES[state.mesIdx] },
+            gestiones: [...inm.cobro.gestiones, { fecha: "hoy", texto: "Código de pago en efectivo generado (Efecty · Baloto)" }],
+          },
+        };
+      });
+      return { ...state, inmuebles, toast: "Código de efectivo generado y enviado al inquilino." };
+    }
+    case "REGISTRAR_GESTION": {
+      const inmuebles = state.inmuebles.map((inm) =>
+        inm.id === accion.id
+          ? { ...inm, cobro: { ...inm.cobro, gestiones: [...inm.cobro.gestiones, { fecha: "hoy", texto: accion.texto }] } }
+          : inm
+      );
+      return { ...state, inmuebles, toast: accion.toast };
+    }
+    case "AVANZAR_MES": {
+      const mesIdx = (state.mesIdx + 1) % 12;
+      const anio = mesIdx === 0 ? state.anio + 1 : state.anio;
+      const r = simularMes(state.inmuebles, mesIdx, anio);
+      return {
+        ...state, mesIdx, anio,
+        inmuebles: r.inmuebles,
+        sim: { eventos: r.eventos, resumen: r.resumen },
+        mesesSimulados: state.mesesSimulados + 1,
+      };
+    }
+    case "TOAST":
+      return { ...state, toast: accion.texto };
+    case "LIMPIAR_TOAST":
+      return { ...state, toast: null };
+    default:
+      return state;
+  }
+}
+
+/* ============================================================
+   Iconos (SVG inline)
+   ============================================================ */
+const Icono = ({ d, className = "w-6 h-6", stroke = 1.8 }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={stroke} stroke="currentColor" aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" d={d} />
+  </svg>
+);
+const IC = {
+  casa: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6",
+  plata: "M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z",
+  play: "M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+  mas: "M12 4v16m8-8H4",
+  escudo: "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.031 9-11.622 0-1.042-.133-2.052-.382-3.016z",
+  cheque: "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
+};
+
+/* ============================================================
+   Piezas pequeñas
+   ============================================================ */
+const Insignia = ({ tono, children }) => {
+  const tonos = {
+    verde: "bg-brote text-bosque",
+    ambar: "bg-amber-100 text-amber-800",
+    rojo: "bg-rose-100 text-rose-700",
+    gris: "bg-marfil text-humo",
+  };
+  return (
+    <span className={"inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold " + tonos[tono]}>
+      {children}
+    </span>
+  );
+};
+
+const Toast = ({ texto, alCerrar }) => {
+  useEffect(() => {
+    const t = setTimeout(alCerrar, 3200);
+    return () => clearTimeout(t);
+  }, [texto]);
+  return (
+    <div className="fixed bottom-24 inset-x-0 z-50 flex justify-center px-6 pointer-events-none">
+      <div className="bg-tinta text-white text-sm font-medium rounded-xl px-4 py-3 shadow-lg max-w-md">
+        {texto}
+      </div>
+    </div>
+  );
+};
+
+/* ============================================================
+   Dashboard del dueño
+   ============================================================ */
+function insigniaPrincipal(inm) {
+  if (inm.plan === "garantizado") {
+    if (inm.desembolso.estado === "adelantado") return <Insignia tono="verde">Adelantado ✓</Insignia>;
+    return <Insignia tono="gris">Programado día 1</Insignia>;
+  }
+  if (inm.cobro.estado === "pagado") return <Insignia tono="verde">Pagado ✓</Insignia>;
+  if (inm.cobro.estado === "mora") return <Insignia tono="rojo">En mora</Insignia>;
+  return <Insignia tono="ambar">Cobrando al inquilino</Insignia>;
+}
+
+function TarjetaInmueble({ inm, mesIdx, dispatch }) {
+  const [verHistorial, setVerHistorial] = useState(false);
+  const neto = netoDe(inm);
+  const proximoMes = MESES[(mesIdx + 1) % 12];
+  const enProblemas = inm.cobro.estado !== "pagado";
+
+  return (
+    <article className="bg-white rounded-2xl shadow-tarjeta p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="font-bold text-tinta leading-snug">{inm.nombre}</h3>
+          <p className="text-xs text-humo mt-0.5">{inm.direccion}</p>
+        </div>
+        {insigniaPrincipal(inm)}
+      </div>
+
+      <div className="mt-4 flex items-center justify-between text-sm">
+        <span className="text-humo">Canon mensual</span>
+        <span className="font-bold text-tinta num">{fmt(inm.canon)}</span>
+      </div>
+      <div className="mt-1.5 flex items-center justify-between text-sm">
+        <span className="text-humo">Plan</span>
+        <span className={"font-semibold " + (inm.plan === "garantizado" ? "text-bosque" : "text-humo")}>
+          {inm.plan === "garantizado" ? "Arriendo Garantizado" : "Solo Gestión de Cobro"}
+        </span>
+      </div>
+
+      {/* Estado del cobro al inquilino */}
+      <div className={"mt-4 rounded-xl px-3.5 py-3 text-sm " + (
+        inm.cobro.estado === "pagado" ? "bg-brote text-bosque" :
+        inm.cobro.estado === "mora" ? "bg-rose-50 text-rose-800" : "bg-amber-50 text-amber-800"
+      )}>
+        <p className="font-medium">{inm.cobro.texto}</p>
+        {inm.plan === "garantizado" && enProblemas && (
+          <p className="mt-1.5 flex items-center gap-1.5 text-xs font-semibold text-bosque">
+            <Icono d={IC.escudo} className="w-4 h-4" /> Esto no afecta tu pago: ya lo tienes.
+          </p>
+        )}
+      </div>
+
+      {/* Próximo desembolso */}
+      <div className="mt-3 flex items-center justify-between rounded-xl border border-marfil px-3.5 py-3">
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-humo font-semibold">Próximo desembolso</p>
+          <p className="text-sm text-tinta font-medium mt-0.5">
+            {inm.plan === "garantizado" ? "1 de " + proximoMes : inm.desembolso.estado === "pendiente" ? "Cuando el inquilino pague" : "Con el próximo recaudo"}
+          </p>
+        </div>
+        <p className="font-bold text-bosque num">{fmt(neto)}</p>
+      </div>
+
+      {inm.plan === "gestion" && inm.cobro.estado === "mora" && (
+        <div className="mt-3 rounded-xl bg-bosque text-white px-3.5 py-3 text-sm">
+          <p className="font-semibold">Con Arriendo Garantizado, esta plata te habría llegado el día 1.</p>
+          <p className="text-white/80 text-xs mt-1">Nosotros asumimos la mora, no tú.</p>
+        </div>
+      )}
+
+      <div className="mt-4 flex items-center justify-between">
+        <button
+          onClick={() => setVerHistorial(!verHistorial)}
+          className="text-sm font-semibold text-humo hover:text-tinta"
+        >
+          {verHistorial ? "Ocultar pagos" : "Pagos recibidos (" + inm.historial.length + ")"}
+        </button>
+        <button
+          onClick={() => dispatch({ tipo: "IR", pantalla: "cobranza", cobranzaId: inm.id })}
+          className="text-sm font-semibold text-bosque hover:text-selva"
+        >
+          Ver cobranza →
+        </button>
+      </div>
+
+      {verHistorial && (
+        <ul className="mt-3 border-t border-marfil pt-3 flex flex-col gap-2">
+          {[...inm.historial].reverse().map((h, i) => (
+            <li key={i} className="flex items-center justify-between text-sm">
+              <span className="text-humo">
+                <span className="num font-medium text-tinta">{h.fecha}</span> · {h.concepto}
+              </span>
+              <span className="font-semibold text-menta num">+ {fmt(h.monto)}</span>
+            </li>
+          ))}
+          {inm.historial.length === 0 && <li className="text-sm text-humo">Aún no hay pagos: tu primer desembolso está programado.</li>}
+        </ul>
+      )}
+    </article>
+  );
+}
+
+function Inicio({ state, dispatch }) {
+  const { inmuebles, mesIdx } = state;
+  const garantizados = inmuebles.filter((i) => i.plan === "garantizado" && i.desembolso.estado === "adelantado");
+  const totalAdelantado = garantizados.reduce((s, i) => s + netoDe(i), 0);
+  const conNovedad = inmuebles.filter((i) => i.cobro.estado !== "pagado").length;
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Hero: la tesis en 10 segundos */}
+      <section className="rounded-2xl bg-bosque text-white p-6 shadow-tarjeta relative overflow-hidden">
+        <div className="absolute -right-10 -top-10 w-40 h-40 rounded-full bg-selva opacity-60" aria-hidden="true"></div>
+        <div className="relative">
+          <p className="text-sm font-medium text-white/80">Tu arriendo de {MESES[mesIdx]} ya está en tu cuenta</p>
+          <p className="text-4xl font-extrabold num mt-2 tracking-tight">{fmt(totalAdelantado)}</p>
+          <p className="text-sm text-white/80 mt-1">
+            Desembolsado el 1 de {MESES[mesIdx]} · {garantizados.length} {garantizados.length === 1 ? "inmueble garantizado" : "inmuebles garantizados"}
+          </p>
+          <div className="mt-4 inline-flex items-center gap-2 bg-white/10 rounded-full px-3.5 py-2 text-xs font-semibold">
+            <Icono d={IC.escudo} className="w-4 h-4" />
+            Si el inquilino no paga, el problema es nuestro. No tuyo.
+          </div>
+        </div>
+      </section>
+
+      {/* Cómo funciona, en una línea */}
+      <section className="bg-white rounded-2xl shadow-tarjeta px-5 py-4 flex items-center justify-between text-center">
+        {[
+          ["1", "Te pagamos el día 1"],
+          ["2", "Nosotros cobramos"],
+          ["3", "Tú no persigues a nadie"],
+        ].map(([n, t], i) => (
+          <React.Fragment key={n}>
+            {i > 0 && <span className="text-marfil text-2xl font-light" aria-hidden="true">›</span>}
+            <div className="flex-1">
+              <p className="text-lg font-extrabold text-bosque num">{n}</p>
+              <p className="text-[11px] text-humo font-medium leading-tight mt-0.5">{t}</p>
+            </div>
+          </React.Fragment>
+        ))}
+      </section>
+
+      <div className="flex items-center justify-between mt-1">
+        <h2 className="font-bold text-tinta text-lg">Tus inmuebles</h2>
+        {conNovedad > 0 && (
+          <span className="text-xs font-semibold text-humo">
+            {conNovedad} en gestión de cobro — sin acción tuya
+          </span>
+        )}
+      </div>
+
+      {inmuebles.map((inm) => (
+        <TarjetaInmueble key={inm.id} inm={inm} mesIdx={mesIdx} dispatch={dispatch} />
+      ))}
+
+      <button
+        onClick={() => dispatch({ tipo: "ABRIR_ONBOARDING" })}
+        className="rounded-2xl border-2 border-dashed border-humo/30 text-humo font-semibold py-4 hover:border-bosque hover:text-bosque transition-colors flex items-center justify-center gap-2"
+      >
+        <Icono d={IC.mas} className="w-5 h-5" /> Agregar otro inmueble
+      </button>
+    </div>
+  );
+}
+
+/* ============================================================
+   Vista de cobranza (la magia)
+   ============================================================ */
+function ReciboEfectivo({ codigo, inquilino }) {
+  return (
+    <div className="mt-4 rounded-xl border-2 border-dashed border-bosque/30 bg-marfil p-4">
+      <div className="flex items-center justify-between">
+        <p className="font-extrabold text-bosque tracking-tight">RENTIA · Recibo de pago</p>
+        <div className="flex gap-1.5">
+          <span className="text-[10px] font-bold bg-yellow-300 text-yellow-900 rounded px-1.5 py-0.5">EFECTY</span>
+          <span className="text-[10px] font-bold bg-red-500 text-white rounded px-1.5 py-0.5">BALOTO</span>
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-humo font-semibold">Convenio</p>
+          <p className="font-bold text-tinta num">{codigo.convenio}</p>
+        </div>
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-humo font-semibold">Valor a pagar</p>
+          <p className="font-bold text-tinta num">{fmt(codigo.valor)}</p>
+        </div>
+        <div className="col-span-2">
+          <p className="text-[11px] uppercase tracking-wide text-humo font-semibold">Referencia de pago</p>
+          <p className="font-extrabold text-tinta text-xl num tracking-wider">{codigo.ref}</p>
+        </div>
+        <div className="col-span-2">
+          <p className="text-[11px] uppercase tracking-wide text-humo font-semibold">Paga a nombre de</p>
+          <p className="font-medium text-tinta">{inquilino} → Rentia S.A.S. · vence el {codigo.vence}</p>
+        </div>
+      </div>
+      <div className="codigo-barras mt-4 rounded" role="img" aria-label="Código de barras del recibo"></div>
+      <p className="mt-3 text-xs text-bosque font-semibold flex items-center gap-1.5">
+        <Icono d={IC.escudo} className="w-4 h-4 shrink-0" />
+        El efectivo entra directo a la cuenta de Rentia. Tú nunca manejas billetes.
+      </p>
+    </div>
+  );
+}
+
+function Cobranza({ state, dispatch }) {
+  const inm = state.inmuebles.find((i) => i.id === state.cobranzaId) || state.inmuebles[0];
+  const linkPago = "rentia.co/pago/" + (1000 + inm.id * 37);
+
+  const nodosFlujo = [
+    { titulo: "Inquilino", detalle: inm.inquilino.nombre.split(" ")[0] },
+    { titulo: "Paga como pueda", detalle: "Link · Efecty · Baloto" },
+    { titulo: "Rentia", detalle: "recibe y concilia" },
+    { titulo: "Tú", detalle: inm.plan === "garantizado" ? "ya pagado día 1 ✓" : "recibes el recaudo" },
+  ];
+
+  return (
+    <div className="flex flex-col gap-4">
+      <header>
+        <h2 className="font-bold text-tinta text-lg">Cobranza</h2>
+        <p className="text-sm text-humo mt-0.5">Así le cobramos a tu inquilino. Tú solo miras.</p>
+      </header>
+
+      {/* Selector de inmueble */}
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+        {state.inmuebles.map((i) => (
+          <button
+            key={i.id}
+            onClick={() => dispatch({ tipo: "IR", pantalla: "cobranza", cobranzaId: i.id })}
+            className={"shrink-0 rounded-full px-4 py-2 text-sm font-semibold transition-colors " + (
+              i.id === inm.id ? "bg-bosque text-white" : "bg-white text-humo shadow-tarjeta"
+            )}
+          >
+            {i.inquilino.nombre.split(" ")[0]} · {i.nombre.split(" · ")[1]}
+          </button>
+        ))}
+      </div>
+
+      {/* Estado del cobro */}
+      <section className="bg-white rounded-2xl shadow-tarjeta p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-bold text-tinta">{inm.inquilino.nombre}</h3>
+            <p className="text-xs text-humo mt-0.5">{inm.nombre} · {inm.inquilino.telefono}</p>
+            <p className="text-xs text-humo">Paga por {inm.inquilino.metodo === "efectivo" ? "efectivo" : "transferencia"} · canon <span className="num">{fmt(inm.canon)}</span> · día {inm.diaPago}</p>
+          </div>
+          {inm.cobro.estado === "pagado" ? <Insignia tono="verde">Al día ✓</Insignia> :
+           inm.cobro.estado === "mora" ? <Insignia tono="rojo">En mora</Insignia> :
+           <Insignia tono="ambar">Cobrando</Insignia>}
+        </div>
+
+        {/* Flujo del dinero */}
+        <div className="mt-5 grid grid-cols-4 gap-1 items-stretch text-center">
+          {nodosFlujo.map((n, i) => (
+            <div key={i} className="relative">
+              <div className={"rounded-xl px-1 py-2.5 h-full " + (
+                i === 2 ? "bg-bosque text-white" : i === 3 ? "bg-brote text-bosque" : "bg-marfil text-tinta"
+              )}>
+                <p className="text-[11px] font-bold leading-tight">{n.titulo}</p>
+                <p className={"text-[10px] mt-0.5 leading-tight " + (i === 2 ? "text-white/75" : "text-humo") + (i === 3 ? " text-bosque/80 font-semibold" : "")}>{n.detalle}</p>
+              </div>
+              {i < 3 && <span className="absolute top-1/2 -right-[7px] -translate-y-1/2 text-humo text-xs z-10" aria-hidden="true">▸</span>}
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-xs text-humo text-center">
+          {inm.plan === "garantizado"
+            ? "Todo esto pasa sin ti: tu plata llegó el día 1."
+            : "Te transferimos apenas el pago entre a Rentia."}
+        </p>
+      </section>
+
+      {/* Canal 1: link de pago */}
+      <section className="bg-white rounded-2xl shadow-tarjeta p-5">
+        <h3 className="font-bold text-tinta flex items-center gap-2">
+          <span className="w-8 h-8 rounded-lg bg-brote text-bosque flex items-center justify-center"><Icono d={IC.plata} className="w-5 h-5" /></span>
+          Link de pago
+        </h3>
+        <p className="text-sm text-humo mt-2">El inquilino paga con PSE, tarjeta o Nequi desde el celular.</p>
+        <div className="mt-3 rounded-xl bg-marfil px-3.5 py-3 font-mono text-sm text-tinta select-all">{linkPago}</div>
+        <div className="mt-3 flex gap-2">
+          <button
+            onClick={() => dispatch({ tipo: "REGISTRAR_GESTION", id: inm.id, texto: "Link de pago reenviado por WhatsApp", toast: "Link enviado por WhatsApp a " + inm.inquilino.nombre.split(" ")[0] + "." })}
+            className="flex-1 rounded-xl bg-bosque text-white font-semibold text-sm py-3 hover:bg-selva transition-colors"
+          >
+            Enviar por WhatsApp
+          </button>
+          <button
+            onClick={() => {
+              try { navigator.clipboard.writeText("https://" + linkPago); } catch (e) {}
+              dispatch({ tipo: "TOAST", texto: "Link copiado." });
+            }}
+            className="rounded-xl border border-humo/25 text-tinta font-semibold text-sm px-4 hover:border-bosque transition-colors"
+          >
+            Copiar
+          </button>
+        </div>
+      </section>
+
+      {/* Canal 2: efectivo (la magia) */}
+      <section className="bg-white rounded-2xl shadow-tarjeta p-5">
+        <h3 className="font-bold text-tinta flex items-center gap-2">
+          <span className="w-8 h-8 rounded-lg bg-brote text-bosque flex items-center justify-center text-base" aria-hidden="true">🏪</span>
+          Pago en efectivo
+        </h3>
+        <p className="text-sm text-humo mt-2">
+          ¿Tu inquilino paga en billetes? Le generamos un código para pagar en más de
+          <strong className="text-tinta"> 20.000 puntos</strong> Efecty, Baloto y SuperGIROS en todo el país.
+        </p>
+        {inm.cobro.codigo ? (
+          <ReciboEfectivo codigo={inm.cobro.codigo} inquilino={inm.inquilino.nombre} />
+        ) : (
+          <button
+            onClick={() => dispatch({ tipo: "GENERAR_CODIGO", id: inm.id })}
+            className="mt-3 w-full rounded-xl bg-bosque text-white font-semibold text-sm py-3 hover:bg-selva transition-colors"
+          >
+            Generar código de efectivo
+          </button>
+        )}
+      </section>
+
+      {/* Gestiones */}
+      <section className="bg-white rounded-2xl shadow-tarjeta p-5">
+        <h3 className="font-bold text-tinta">Gestiones de este cobro</h3>
+        <p className="text-xs text-humo mt-0.5">Cada paso queda registrado. Tú no hiciste ninguno.</p>
+        <ul className="mt-3 flex flex-col">
+          {[...inm.cobro.gestiones].reverse().map((g, i) => (
+            <li key={i} className="flex gap-3 py-2 border-b border-marfil last:border-0">
+              <span className="mt-1 w-2 h-2 rounded-full bg-menta shrink-0" aria-hidden="true"></span>
+              <div>
+                <p className="text-sm text-tinta">{g.texto}</p>
+                <p className="text-xs text-humo num">{g.fecha}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
+/* ============================================================
+   Simulador (para el pitch)
+   ============================================================ */
+const ESTILO_EVENTO = {
+  desembolso: { icono: "💚", clase: "bg-brote border-menta/30", titulo: "text-bosque" },
+  pago:       { icono: "💵", clase: "bg-white border-marfil", titulo: "text-tinta" },
+  gestion:    { icono: "📣", clase: "bg-white border-marfil", titulo: "text-tinta" },
+  escudo:     { icono: "🛡️", clase: "bg-bosque border-bosque", titulo: "text-white", oscuro: true },
+  alerta:     { icono: "⚠️", clase: "bg-rose-50 border-rose-200", titulo: "text-rose-800" },
+};
+
+function Simulador({ state, dispatch }) {
+  const { sim, mesIdx, anio } = state;
+  const finRef = useRef(null);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <header>
+        <h2 className="font-bold text-tinta text-lg">Simulador</h2>
+        <p className="text-sm text-humo mt-0.5">
+          Mira un mes completo del ciclo Rentia: te pagamos el día 1 y luego cobramos, aunque haya retrasos o mora.
+        </p>
+      </header>
+
+      <button
+        onClick={() => {
+          dispatch({ tipo: "AVANZAR_MES" });
+          setTimeout(() => finRef.current && finRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" }), 60);
+        }}
+        className="rounded-2xl bg-bosque text-white font-bold py-4 shadow-tarjeta hover:bg-selva transition-colors flex items-center justify-center gap-2 text-base"
+      >
+        <Icono d={IC.play} className="w-5 h-5" />
+        Avanzar un mes → {cap(MESES[(mesIdx + 1) % 12])} {mesIdx === 11 ? anio + 1 : anio}
+      </button>
+
+      {!sim && (
+        <div className="bg-white rounded-2xl shadow-tarjeta p-5 text-sm text-humo">
+          <p className="font-semibold text-tinta">¿Qué vas a ver?</p>
+          <ul className="mt-2 flex flex-col gap-1.5 list-disc list-inside">
+            <li>Día 1: adelantamos el arriendo a los dueños con plan Garantizado.</li>
+            <li>Después, cada inquilino paga a su manera: a tiempo, tarde o en efectivo.</li>
+            <li>Si alguien cae en mora, verás quién carga con el problema (nosotros).</li>
+          </ul>
+        </div>
+      )}
+
+      {sim && (
+        <React.Fragment>
+          {/* Resumen del dueño primero: la plata llegó */}
+          <section className="rounded-2xl bg-bosque text-white p-5 shadow-tarjeta">
+            <p className="text-xs font-semibold uppercase tracking-wide text-white/70">{sim.resumen.mesNombre} · resultado para ti</p>
+            <p className="text-3xl font-extrabold num mt-1.5 tracking-tight">{fmt(sim.resumen.totalAdelantado)}</p>
+            <p className="text-sm text-white/85 mt-1">recibidos el día 1, antes de que ningún inquilino pagara.</p>
+            <p className="mt-3 text-xs bg-white/10 rounded-lg px-3 py-2 inline-block">
+              Detrás de escena, Rentia hizo <strong className="num">{Math.max(sim.resumen.gestionesHechas, 1)}</strong> gestiones de cobro. Tú, cero.
+            </p>
+          </section>
+
+          <h3 className="font-bold text-tinta mt-1">Así se vivió el mes, día a día</h3>
+          <ol className="flex flex-col gap-2.5">
+            {sim.eventos.map((e, i) => {
+              const est = ESTILO_EVENTO[e.tipo];
+              return (
+                <li key={i} className={"rounded-xl border px-4 py-3 flex gap-3 items-start " + est.clase}>
+                  <div className="flex flex-col items-center shrink-0">
+                    <span className={"text-[10px] font-bold uppercase tracking-wide " + (est.oscuro ? "text-white/60" : "text-humo")}>día</span>
+                    <span className={"text-lg font-extrabold num leading-none " + (est.oscuro ? "text-white" : "text-tinta")}>{e.dia}</span>
+                  </div>
+                  <div>
+                    <p className={"text-sm font-semibold leading-snug " + est.titulo}>
+                      <span className="mr-1" aria-hidden="true">{est.icono}</span>{e.titulo}
+                    </p>
+                    <p className={"text-xs mt-0.5 " + (est.oscuro ? "text-white/70" : "text-humo")}>{e.detalle}</p>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+
+          <section ref={finRef} className="bg-white rounded-2xl shadow-tarjeta p-5">
+            <h3 className="font-bold text-tinta">Moraleja del mes</h3>
+            <div className="mt-3 grid grid-cols-2 gap-3 text-center">
+              <div className="rounded-xl bg-brote px-3 py-4">
+                <p className="text-2xl" aria-hidden="true">😌</p>
+                <p className="text-sm font-bold text-bosque mt-1">El dueño</p>
+                <p className="text-xs text-humo mt-1">Recibió su plata el día 1 y no llamó a nadie.</p>
+              </div>
+              <div className="rounded-xl bg-marfil px-3 py-4">
+                <p className="text-2xl" aria-hidden="true">🏃</p>
+                <p className="text-sm font-bold text-tinta mt-1">Rentia</p>
+                <p className="text-xs text-humo mt-1">Persiguió los pagos, recibió el efectivo y asumió la mora.</p>
+              </div>
+            </div>
+            <p className="text-xs text-humo text-center mt-3">
+              Vuelve a avanzar el mes: los inquilinos cambian de comportamiento y el dueño sigue tranquilo.
+            </p>
+          </section>
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================
+   Onboarding del dueño (3 pasos)
+   ============================================================ */
+const Campo = ({ etiqueta, children }) => (
+  <label className="block">
+    <span className="text-sm font-semibold text-tinta">{etiqueta}</span>
+    <div className="mt-1.5">{children}</div>
+  </label>
+);
+
+const claseInput = "w-full rounded-xl border border-humo/25 bg-white px-3.5 py-3 text-sm text-tinta placeholder-humo/60 focus:outline-none focus:ring-2 focus:ring-bosque/40 focus:border-bosque";
+
+function Onboarding({ state, dispatch }) {
+  const [paso, setPaso] = useState(1);
+  const [listo, setListo] = useState(false);
+  const [f, setF] = useState({
+    nombre: "", direccion: "", canon: 0, diaPago: 5,
+    inqNombre: "", inqTelefono: "", metodo: "transferencia",
+    plan: "garantizado",
+  });
+  const set = (campo) => (e) => setF({ ...f, [campo]: e.target.value });
+  const canonValido = f.canon >= 100000;
+  const paso1Ok = f.nombre.trim() && f.direccion.trim() && canonValido;
+  const paso2Ok = f.inqNombre.trim() && f.inqTelefono.trim();
+
+  const confirmar = () => {
+    const id = Math.max(...state.inmuebles.map((i) => i.id)) + 1;
+    dispatch({
+      tipo: "AGREGAR_INMUEBLE",
+      inmueble: {
+        id,
+        nombre: f.nombre.trim(),
+        direccion: f.direccion.trim(),
+        canon: Number(f.canon),
+        diaPago: Number(f.diaPago),
+        plan: f.plan,
+        perfil: "nuevo",
+        inquilino: { nombre: f.inqNombre.trim(), telefono: f.inqTelefono.trim(), metodo: f.metodo },
+        desembolso: f.plan === "garantizado"
+          ? { estado: "programado", texto: "Primer adelanto: 1 de " + MESES[(state.mesIdx + 1) % 12] }
+          : { estado: "pendiente", texto: "Te transferimos apenas recaudemos" },
+        cobro: {
+          estado: "cobrando",
+          texto: "Le dimos la bienvenida a " + f.inqNombre.trim().split(" ")[0] + " y activamos el cobro",
+          codigo: null,
+          gestiones: [{ fecha: "hoy", texto: "Bienvenida enviada al inquilino por WhatsApp con sus opciones de pago" }],
+        },
+        historial: [],
+      },
+    });
+  };
+
+  const tarifaG = canonValido ? tarifaDe(Number(f.canon), "garantizado") : null;
+  const tarifaC = canonValido ? tarifaDe(Number(f.canon), "gestion") : null;
+
+  return (
+    <div className="fixed inset-0 z-40 bg-tinta/40 flex items-end sm:items-center justify-center" role="dialog" aria-modal="true" aria-label="Registrar inmueble">
+      <div className="bg-marfil w-full max-w-md rounded-t-3xl sm:rounded-3xl max-h-[92vh] overflow-y-auto">
+        <div className="sticky top-0 bg-marfil px-6 pt-5 pb-3 flex items-center justify-between">
+          <div>
+            <h2 className="font-bold text-tinta text-lg">{listo ? "¡Todo listo!" : "Nuevo inmueble"}</h2>
+            {!listo && <p className="text-xs text-humo">Paso {paso} de 3 · {["el inmueble", "el inquilino", "tu plan"][paso - 1]}</p>}
+          </div>
+          <button onClick={() => dispatch({ tipo: "CERRAR_ONBOARDING" })} className="text-humo hover:text-tinta text-sm font-semibold px-2 py-1" aria-label="Cerrar">✕</button>
+        </div>
+
+        {!listo && (
+          <div className="px-6 flex gap-1.5" aria-hidden="true">
+            {[1, 2, 3].map((p) => (
+              <div key={p} className={"h-1.5 flex-1 rounded-full " + (p <= paso ? "bg-bosque" : "bg-humo/20")}></div>
+            ))}
+          </div>
+        )}
+
+        <div className="px-6 py-5 flex flex-col gap-4">
+          {listo ? (
+            <div className="text-center py-6">
+              <div className="mx-auto w-16 h-16 rounded-full bg-brote text-bosque flex items-center justify-center">
+                <Icono d={IC.cheque} className="w-9 h-9" />
+              </div>
+              <h3 className="font-bold text-tinta text-xl mt-4">{f.nombre}</h3>
+              <p className="text-sm text-humo mt-2 max-w-xs mx-auto">
+                {f.plan === "garantizado"
+                  ? "Tu arriendo queda garantizado. El primer adelanto de " + fmt(Number(f.canon) - tarifaG) + " llega a tu cuenta el 1 de " + MESES[(state.mesIdx + 1) % 12] + "."
+                  : "Activamos la gestión de cobro. Te transferimos " + fmt(Number(f.canon) - tarifaC) + " apenas " + f.inqNombre.split(" ")[0] + " pague."}
+              </p>
+              <button onClick={confirmar} className="mt-6 w-full rounded-xl bg-bosque text-white font-bold py-3.5 hover:bg-selva transition-colors">
+                Ir a mi tablero
+              </button>
+            </div>
+          ) : paso === 1 ? (
+            <React.Fragment>
+              <Campo etiqueta="Nombre corto del inmueble">
+                <input className={claseInput} placeholder="Ej: Apto 501 · Cedritos" value={f.nombre} onChange={set("nombre")} />
+              </Campo>
+              <Campo etiqueta="Dirección">
+                <input className={claseInput} placeholder="Ej: Cl 140 # 12-34, Bogotá" value={f.direccion} onChange={set("direccion")} />
+              </Campo>
+              <Campo etiqueta="Valor del arriendo (canon mensual)">
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-humo text-sm">$</span>
+                  <input
+                    className={claseInput + " pl-8 num"}
+                    inputMode="numeric"
+                    placeholder="1.500.000"
+                    value={f.canon ? Number(f.canon).toLocaleString("es-CO") : ""}
+                    onChange={(e) => setF({ ...f, canon: Number(e.target.value.replace(/\D/g, "")) })}
+                  />
+                </div>
+                {!canonValido && f.canon > 0 && <p className="text-xs text-rose-600 mt-1">Ingresa un canon de al menos $ 100.000.</p>}
+              </Campo>
+              <Campo etiqueta="Día de pago acordado con el inquilino">
+                <select className={claseInput} value={f.diaPago} onChange={set("diaPago")}>
+                  {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+                    <option key={d} value={d}>Día {d} de cada mes</option>
+                  ))}
+                </select>
+              </Campo>
+              <button disabled={!paso1Ok} onClick={() => setPaso(2)}
+                className="mt-2 rounded-xl bg-bosque text-white font-bold py-3.5 disabled:opacity-40 hover:bg-selva transition-colors">
+                Continuar
+              </button>
+            </React.Fragment>
+          ) : paso === 2 ? (
+            <React.Fragment>
+              <Campo etiqueta="Nombre del inquilino">
+                <input className={claseInput} placeholder="Ej: Andrés Gómez" value={f.inqNombre} onChange={set("inqNombre")} />
+              </Campo>
+              <Campo etiqueta="Teléfono (WhatsApp)">
+                <input className={claseInput} inputMode="tel" placeholder="Ej: 300 123 4567" value={f.inqTelefono} onChange={set("inqTelefono")} />
+              </Campo>
+              <Campo etiqueta="¿Cómo paga normalmente?">
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    ["transferencia", "🏦 Transferencia", "Nequi, PSE o banco"],
+                    ["efectivo", "💵 Efectivo", "Le damos código Efecty/Baloto"],
+                  ].map(([valor, titulo, det]) => (
+                    <button key={valor} type="button" onClick={() => setF({ ...f, metodo: valor })}
+                      className={"rounded-xl border-2 px-3 py-3 text-left transition-colors " + (
+                        f.metodo === valor ? "border-bosque bg-brote" : "border-humo/20 bg-white"
+                      )}>
+                      <p className="text-sm font-bold text-tinta">{titulo}</p>
+                      <p className="text-[11px] text-humo mt-0.5">{det}</p>
+                    </button>
+                  ))}
+                </div>
+              </Campo>
+              <p className="text-xs text-humo bg-white rounded-xl px-3.5 py-3">
+                Sea como sea que pague, el dinero entra a Rentia y a ti te llega por transferencia. Nunca recibes efectivo.
+              </p>
+              <div className="mt-2 flex gap-2">
+                <button onClick={() => setPaso(1)} className="rounded-xl border border-humo/25 text-tinta font-semibold px-5 py-3.5">Atrás</button>
+                <button disabled={!paso2Ok} onClick={() => setPaso(3)}
+                  className="flex-1 rounded-xl bg-bosque text-white font-bold py-3.5 disabled:opacity-40 hover:bg-selva transition-colors">
+                  Continuar
+                </button>
+              </div>
+            </React.Fragment>
+          ) : (
+            <React.Fragment>
+              <button type="button" onClick={() => setF({ ...f, plan: "garantizado" })}
+                className={"rounded-2xl border-2 p-4 text-left transition-colors " + (f.plan === "garantizado" ? "border-bosque bg-white" : "border-humo/20 bg-white/60")}>
+                <div className="flex items-center justify-between">
+                  <p className="font-bold text-tinta">Arriendo Garantizado</p>
+                  <Insignia tono="verde">Recomendado</Insignia>
+                </div>
+                <p className="text-sm text-humo mt-1.5">
+                  Te adelantamos el arriendo <strong className="text-tinta">el día 1 de cada mes, pase lo que pase</strong>. Si el inquilino se atrasa o no paga, el riesgo es nuestro.
+                </p>
+                <p className="text-sm font-bold text-bosque mt-2 num">
+                  {tarifaG ? "Tarifa fija: " + fmt(tarifaG) + "/mes · recibes " + fmt(Number(f.canon) - tarifaG) : "Tarifa fija mensual del 8% del canon"}
+                </p>
+              </button>
+              <button type="button" onClick={() => setF({ ...f, plan: "gestion" })}
+                className={"rounded-2xl border-2 p-4 text-left transition-colors " + (f.plan === "gestion" ? "border-bosque bg-white" : "border-humo/20 bg-white/60")}>
+                <p className="font-bold text-tinta">Solo Gestión de Cobro</p>
+                <p className="text-sm text-humo mt-1.5">
+                  Nosotros perseguimos el pago por ti (recordatorios, llamadas, efectivo) y te transferimos <strong className="text-tinta">cuando el inquilino pague</strong>.
+                </p>
+                <p className="text-sm font-bold text-tinta mt-2 num">
+                  {tarifaC ? "Tarifa: " + fmt(tarifaC) + "/mes · recibes " + fmt(Number(f.canon) - tarifaC) : "Tarifa mensual del 4% del canon"}
+                </p>
+              </button>
+              <div className="mt-2 flex gap-2">
+                <button onClick={() => setPaso(2)} className="rounded-xl border border-humo/25 text-tinta font-semibold px-5 py-3.5">Atrás</button>
+                <button onClick={() => setListo(true)}
+                  className="flex-1 rounded-xl bg-bosque text-white font-bold py-3.5 hover:bg-selva transition-colors">
+                  {f.plan === "garantizado" ? "Garantizar mi arriendo" : "Activar gestión de cobro"}
+                </button>
+              </div>
+            </React.Fragment>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   Marco de la app
+   ============================================================ */
+function App() {
+  const [state, dispatch] = useReducer(reducer, estadoInicial);
+  const { pantalla } = state;
+
+  const tabs = [
+    { id: "inicio", nombre: "Inicio", icono: IC.casa },
+    { id: "cobranza", nombre: "Cobranza", icono: IC.plata },
+    { id: "simulador", nombre: "Simular", icono: IC.play },
+  ];
+
+  return (
+    <div className="min-h-screen bg-marfil max-w-md mx-auto shadow-2xl relative">
+      <header className="sticky top-0 z-30 bg-marfil/95 backdrop-blur px-5 pt-4 pb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-bosque text-white flex items-center justify-center font-extrabold text-lg" aria-hidden="true">R</div>
+          <div>
+            <p className="font-extrabold text-tinta leading-none tracking-tight">Rentia</p>
+            <p className="text-[11px] text-humo leading-tight mt-0.5">Tu arriendo, garantizado</p>
+          </div>
+        </div>
+        <span className="text-xs font-semibold text-humo bg-white rounded-full px-3 py-1.5 shadow-tarjeta num">
+          {cap(MESES[state.mesIdx])} {state.anio}
+        </span>
+      </header>
+
+      <main className="px-5 pb-32 pt-2">
+        {pantalla === "inicio" && <Inicio state={state} dispatch={dispatch} />}
+        {pantalla === "cobranza" && <Cobranza state={state} dispatch={dispatch} />}
+        {pantalla === "simulador" && <Simulador state={state} dispatch={dispatch} />}
+        <p className="text-center text-[11px] text-humo/70 mt-8">Prototipo de demostración · datos simulados en memoria</p>
+      </main>
+
+      <nav className="fixed bottom-0 inset-x-0 z-30 flex justify-center" aria-label="Navegación principal">
+        <div className="w-full max-w-md bg-white border-t border-marfil px-2 pb-[env(safe-area-inset-bottom)] grid grid-cols-4">
+          {tabs.map((t) => (
+            <button key={t.id} onClick={() => dispatch({ tipo: "IR", pantalla: t.id })}
+              className={"flex flex-col items-center gap-1 py-2.5 text-[11px] font-semibold transition-colors " + (
+                pantalla === t.id ? "text-bosque" : "text-humo hover:text-tinta"
+              )}
+              aria-current={pantalla === t.id ? "page" : undefined}>
+              <Icono d={t.icono} className="w-6 h-6" stroke={pantalla === t.id ? 2.2 : 1.8} />
+              {t.nombre}
+            </button>
+          ))}
+          <button onClick={() => dispatch({ tipo: "ABRIR_ONBOARDING" })}
+            className="flex flex-col items-center gap-1 py-2.5 text-[11px] font-semibold text-humo hover:text-tinta transition-colors">
+            <span className="w-6 h-6 rounded-lg bg-bosque text-white flex items-center justify-center"><Icono d={IC.mas} className="w-4 h-4" stroke={2.4} /></span>
+            Agregar
+          </button>
+        </div>
+      </nav>
+
+      {state.onboarding && <Onboarding state={state} dispatch={dispatch} />}
+      {state.toast && <Toast texto={state.toast} alCerrar={() => dispatch({ tipo: "LIMPIAR_TOAST" })} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
